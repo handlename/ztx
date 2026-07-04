@@ -23,6 +23,10 @@ pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
 const LATEST_LINK: &str = "latest.sock";
 
+/// Upper bound for one IPC message; protects the wrapper (and the session it
+/// hosts) from a runaway or malicious client exhausting memory.
+const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
+
 /// Per-user runtime directory holding the session sockets.
 pub fn socket_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("ZEDIATOR_RUNTIME_DIR")
@@ -63,9 +67,14 @@ impl IpcServer {
 
         thread::spawn(move || {
             for stream in listener.incoming() {
-                let Ok(mut stream) = stream else { continue };
+                let Ok(stream) = stream else { continue };
                 let mut message = Vec::new();
-                if stream.read_to_end(&mut message).is_err() || message.is_empty() {
+                if stream
+                    .take(MAX_MESSAGE_LEN)
+                    .read_to_end(&mut message)
+                    .is_err()
+                    || message.is_empty()
+                {
                     continue;
                 }
                 let mut guard = writer.lock().expect("child writer poisoned");
@@ -277,8 +286,7 @@ mod tests {
     #[test]
     fn drop_removes_socket_and_latest_link() {
         with_runtime_dir(|| {
-            let writer: SharedWriter =
-                Arc::new(Mutex::new(Box::new(Capture::default())));
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
             let server = IpcServer::start(writer).unwrap();
             let socket = server.socket_path.clone();
             assert!(socket.exists());

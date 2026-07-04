@@ -46,9 +46,7 @@ fn path_regex() -> &'static Regex {
 
 fn traceback_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"File "(?P<p>[^"]+)", line (?P<l>\d+)"#).expect("static regex")
-    })
+    RE.get_or_init(|| Regex::new(r#"File "(?P<p>[^"]+)", line (?P<l>\d+)"#).expect("static regex"))
 }
 
 /// Extracts existing file paths from `lines` (scanned bottom-up so the most
@@ -132,8 +130,16 @@ pub fn pick(
     stdout: &mut impl Write,
     candidates: &[Candidate],
 ) -> io::Result<Option<usize>> {
-    let rows = crossterm::terminal::size().map(|(_, r)| r as usize).unwrap_or(24);
-    let visible = candidates.len().min(rows.saturating_sub(2)).max(1);
+    let rows = crossterm::terminal::size()
+        .map(|(_, r)| r as usize)
+        .unwrap_or(24);
+    // Single-key labels only: with mixed lengths, a one-key label would
+    // shadow every two-key label sharing its prefix.
+    let visible = candidates
+        .len()
+        .min(rows.saturating_sub(2))
+        .min(LABEL_KEYS.len())
+        .max(1);
     let labels: Vec<String> = (0..visible).map(label).collect();
 
     // Enter alternate screen, hide cursor, draw.
@@ -142,7 +148,11 @@ pub fn pick(
     for (i, candidate) in candidates.iter().take(visible).enumerate() {
         // `display` already carries any :line:col suffix as it appeared.
         stdout.write_all(
-            format!("\x1b[1;33m{:>2}\x1b[0m  {}\r\n", labels[i], candidate.display).as_bytes(),
+            format!(
+                "\x1b[1;33m{:>2}\x1b[0m  {}\r\n",
+                labels[i], candidate.display
+            )
+            .as_bytes(),
         )?;
     }
     stdout.flush()?;

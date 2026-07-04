@@ -57,9 +57,7 @@ pub fn zed(assume_yes: bool) -> io::Result<()> {
     merge_array_file(
         &dir.join("tasks.json"),
         task_entry(),
-        |existing| {
-            existing.get("label").and_then(Value::as_str) == Some(TASK_LABEL)
-        },
+        |existing| existing.get("label").and_then(Value::as_str) == Some(TASK_LABEL),
         assume_yes,
     )?;
     merge_array_file(
@@ -72,6 +70,17 @@ pub fn zed(assume_yes: bool) -> io::Result<()> {
         },
         assume_yes,
     )?;
+
+    // Zed replaces (not extends) `terminal.path_hyperlink_regexes` when the
+    // user sets it, so auto-merging could drop Zed's built-in patterns.
+    // Present the suggestion instead of writing it.
+    println!(
+        "\nOptional: Zed's built-in cmd+click already detects `path:line:col`. \
+         If some path formats in your agent CLI's output are not clickable, \
+         extend `terminal.path_hyperlink_regexes` in Zed's settings.json \
+         (note: setting it replaces Zed's defaults, so include the patterns \
+         you still want). zediator's hint mode (ctrl-] f) works regardless."
+    );
 
     println!(
         "\nDone. In Zed, select text and press {KEY_BINDING} to send the \
@@ -108,7 +117,10 @@ fn merge_array_file(
     };
 
     if items.iter().any(&already_present) {
-        println!("{}: zediator entry already present, skipping", path.display());
+        println!(
+            "{}: zediator entry already present, skipping",
+            path.display()
+        );
         return Ok(());
     }
 

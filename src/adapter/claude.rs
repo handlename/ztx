@@ -170,7 +170,10 @@ mod tests {
         write_session(
             &dir.path().join("sessions"),
             "7.json",
-            &format!(r#"{{"pid":7,"sessionId":"s-2","cwd":{:?},"name":"by-cwd"}}"#, cwd),
+            &format!(
+                r#"{{"pid":7,"sessionId":"s-2","cwd":{:?},"name":"by-cwd"}}"#,
+                cwd
+            ),
         );
         // started_at is rewound because the session file above predates the
         // adapter within this test.

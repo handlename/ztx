@@ -54,6 +54,15 @@ impl InputFilter {
         }
         actions
     }
+
+    /// Releases a pending prefix byte (call when stdin reaches EOF so the
+    /// byte is not silently dropped).
+    pub fn flush(&mut self, out: &mut Vec<u8>) {
+        if self.pending {
+            self.pending = false;
+            out.push(self.prefix);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -110,5 +119,18 @@ mod tests {
         let (out, actions) = feed_all(&[b"\x1dx"]);
         assert_eq!(out, b"\x1dx");
         assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn flush_releases_pending_prefix() {
+        let mut filter = InputFilter::new(DEFAULT_PREFIX);
+        let mut out = Vec::new();
+        filter.feed(b"\x1d", &mut out);
+        assert!(out.is_empty());
+        filter.flush(&mut out);
+        assert_eq!(out, b"\x1d");
+        // Idempotent.
+        filter.flush(&mut out);
+        assert_eq!(out, b"\x1d");
     }
 }

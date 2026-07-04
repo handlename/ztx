@@ -87,8 +87,8 @@ mod tests {
             format!(r#"{{{:?}: "conv-1"}}"#, cwd.to_str().unwrap()),
         )
         .unwrap();
-        let conn = rusqlite::Connection::open(dir.path().join("conversation_summaries.db"))
-            .unwrap();
+        let conn =
+            rusqlite::Connection::open(dir.path().join("conversation_summaries.db")).unwrap();
         conn.execute_batch(
             "CREATE TABLE conversation_summaries (
                 conversation_id TEXT PRIMARY KEY,

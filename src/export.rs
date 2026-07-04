@@ -110,6 +110,11 @@ pub fn scrollback_to_markdown(shared: &Arc<Mutex<TapShared>>) -> String {
 pub fn write_export(content: &str) -> io::Result<PathBuf> {
     let dir = std::env::temp_dir().join("zediator");
     std::fs::create_dir_all(&dir)?;
+    // Exports can contain conversation content; keep them owner-only.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
     let mut file = tempfile::Builder::new()
         .prefix("session-")
         .suffix(".md")

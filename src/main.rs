@@ -87,7 +87,10 @@ fn run_send(
 fn run_sessions() -> std::io::Result<()> {
     let sessions = ipc::list_sessions();
     if sessions.is_empty() {
-        println!("no running zediator sessions ({})", ipc::socket_dir().display());
+        println!(
+            "no running zediator sessions ({})",
+            ipc::socket_dir().display()
+        );
         return Ok(());
     }
     for (pid, alive) in sessions {
@@ -103,9 +106,9 @@ fn run_export(kind: adapter::AdapterKind, to_stdout: bool) -> std::io::Result<()
              inside a running session use ctrl-] e for the capture fallback",
         )
     })?;
-    let transcript = resolved.transcript_path().ok_or_else(|| {
-        std::io::Error::other("no session transcript found for this directory")
-    })?;
+    let transcript = resolved
+        .transcript_path()
+        .ok_or_else(|| std::io::Error::other("no session transcript found for this directory"))?;
     let markdown = export::transcript_to_markdown(&transcript)?;
     if to_stdout {
         print!("{markdown}");

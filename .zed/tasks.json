@@ -1,0 +1,20 @@
+// Project tasks configuration. See https://zed.dev/docs/tasks for documentation.
+//
+// Example:
+[
+  {
+    "label": "zediator: send selection",
+    "command": "zediator",
+    "args": [
+      "send",
+      "--file",
+      "$ZED_RELATIVE_FILE",
+      "--line",
+      "$ZED_ROW",
+      "--text",
+      "$ZED_SELECTED_TEXT",
+    ],
+    "hide": "always",
+    "reveal": "never",
+  },
+]

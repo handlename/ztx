@@ -163,6 +163,9 @@ struct Performer {
     shared: Arc<Mutex<TapShared>>,
     line: Vec<char>,
     col: usize,
+    /// Local copy of the alternate-screen flag. Only this thread mutates the
+    /// flag, so caching it avoids taking the mutex for every printed char.
+    alt_screen: bool,
 }
 
 impl Performer {
@@ -171,6 +174,7 @@ impl Performer {
             shared,
             line: Vec::new(),
             col: 0,
+            alt_screen: false,
         }
     }
 
@@ -178,23 +182,21 @@ impl Performer {
         let text: String = self.line.iter().collect();
         self.line.clear();
         self.col = 0;
-        let mut shared = self.shared.lock().expect("tap lock poisoned");
-        if shared.alt_screen {
+        if self.alt_screen {
             return;
         }
-        shared.scrollback.push(text);
-    }
-
-    fn in_alt_screen(&self) -> bool {
-        self.shared.lock().expect("tap lock poisoned").alt_screen
+        self.shared
+            .lock()
+            .expect("tap lock poisoned")
+            .scrollback
+            .push(text);
     }
 
     fn set_alt_screen(&mut self, on: bool) {
-        let mut shared = self.shared.lock().expect("tap lock poisoned");
-        shared.alt_screen = on;
+        self.alt_screen = on;
+        self.shared.lock().expect("tap lock poisoned").alt_screen = on;
         // Entering or leaving the alternate screen discards the partial line:
         // it belongs to the screen being switched away from.
-        drop(shared);
         self.line.clear();
         self.col = 0;
     }
@@ -202,7 +204,7 @@ impl Performer {
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
-        if self.in_alt_screen() {
+        if self.alt_screen {
             return;
         }
         if self.col < self.line.len() {
@@ -243,11 +245,12 @@ impl Perform for Performer {
             return;
         }
 
-        if action == 'K' && !self.in_alt_screen() {
+        if action == 'K' && !self.alt_screen {
             match first {
                 0 => self.line.truncate(self.col), // erase to end of line
                 1 => {
-                    for i in 0..self.col.min(self.line.len()) {
+                    // ECMA-48: erase from line start THROUGH the cursor.
+                    for i in 0..(self.col + 1).min(self.line.len()) {
                         self.line[i] = ' ';
                     }
                 }
@@ -316,6 +319,14 @@ mod tests {
     fn erase_to_end_of_line_truncates() {
         let shared = feed(b"abcdef\r\x1b[Kxy\n");
         assert_eq!(lines(&shared), ["xy"]);
+    }
+
+    #[test]
+    fn erase_to_line_start_includes_cursor_column() {
+        // After overwriting "XY" the cursor sits on column 2 ('c');
+        // EL 1 erases columns 0..=2 inclusive.
+        let shared = feed(b"abcdef\rXY\x1b[1K\n");
+        assert_eq!(lines(&shared), ["   def"]);
     }
 
     #[test]

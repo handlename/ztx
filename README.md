@@ -93,6 +93,9 @@ Environment variables:
 - Markdown export uses the CLI's native transcript when an adapter can locate
   one (Claude Code). Otherwise it falls back to the ANSI-stripped terminal
   capture, which excludes alternate-screen (full-screen TUI) content.
+- Exported Markdown files accumulate under `$TMPDIR/zediator/` (owner-only)
+  so the editor can keep them open; the OS cleans the temp directory
+  periodically, or delete them manually.
 - See [DESIGN.md](DESIGN.md) for architecture, [REQUIREMENTS.md](REQUIREMENTS.md)
   for the requirements this tool answers, and [GLOSSARY.md](GLOSSARY.md) for
   terminology.

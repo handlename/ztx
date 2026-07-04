@@ -36,12 +36,17 @@ pub struct RunOptions {
 /// keyboard protocol, reaches the child as-is.
 pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let pty_system = native_pty_system();
-    let pair = pty_system.openpty(current_size()).map_err(io::Error::other)?;
+    let pair = pty_system
+        .openpty(current_size())
+        .map_err(io::Error::other)?;
 
     let mut builder = CommandBuilder::new(&command[0]);
     builder.args(&command[1..]);
     builder.cwd(std::env::current_dir()?);
-    let mut child = pair.slave.spawn_command(builder).map_err(io::Error::other)?;
+    let mut child = pair
+        .slave
+        .spawn_command(builder)
+        .map_err(io::Error::other)?;
     // Close our copy of the slave end; the child holds its own.
     drop(pair.slave);
 
@@ -49,9 +54,8 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let master = pair.master;
     let mut child_output = master.try_clone_reader().map_err(io::Error::other)?;
     // The child's input is shared between the stdin pump and the IPC server.
-    let child_writer: crate::ipc::SharedWriter = Arc::new(Mutex::new(
-        master.take_writer().map_err(io::Error::other)?,
-    ));
+    let child_writer: crate::ipc::SharedWriter =
+        Arc::new(Mutex::new(master.take_writer().map_err(io::Error::other)?));
 
     tracing::debug!(command = ?command, child_pid = ?child.process_id(), "spawned child in PTY");
     let _raw_mode = crate::term_guard::RawModeGuard::new(io::stdin().is_terminal())?;
@@ -94,9 +98,11 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                     let _ = master.resize(current_size());
                 }
                 _ => {
-                    if let Some(pid) = child_pid {
-                        // SAFETY: forwarding the received signal to the child process.
-                        unsafe { libc::kill(pid as i32, signal) };
+                    if let Some(pid) = child_pid.and_then(|p| i32::try_from(p).ok()) {
+                        // SAFETY: forwarding the received signal to the child
+                        // process; a negative pid (group kill) is impossible
+                        // thanks to the checked conversion above.
+                        unsafe { libc::kill(pid, signal) };
                     }
                 }
             }
@@ -127,7 +133,8 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         let mut stdin = io::stdin().lock();
         let mut buf = [0u8; IO_BUF_SIZE];
         tracing::debug!(interactive = input_is_tty, "stdin pump started");
-        let mut filter = input_is_tty.then(|| crate::input::InputFilter::new(crate::input::DEFAULT_PREFIX));
+        let mut filter =
+            input_is_tty.then(|| crate::input::InputFilter::new(crate::input::DEFAULT_PREFIX));
         let mut forwarded = Vec::with_capacity(IO_BUF_SIZE);
         loop {
             match stdin.read(&mut buf) {
@@ -158,6 +165,16 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                         );
                     }
                 }
+            }
+        }
+        // EOF: release a pending prefix byte so it is not silently dropped.
+        if let Some(filter) = filter.as_mut() {
+            forwarded.clear();
+            filter.flush(&mut forwarded);
+            if !forwarded.is_empty() {
+                let mut writer = child_input.lock().expect("child writer poisoned");
+                let _ = writer.write_all(&forwarded);
+                let _ = writer.flush();
             }
         }
     });
