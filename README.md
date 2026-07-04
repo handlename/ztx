@@ -50,6 +50,7 @@ wrapped CLI keeps its entire keymap. Press `ctrl-]` twice to send a literal
 |------|--------|
 | `ctrl-] f` | Hint mode: pick a file path from the log, open it in the editor |
 | `ctrl-] e` | Export the session log as Markdown and open it |
+| `ctrl-] d` | Dump zediator's internal state to a file (diagnostics) |
 
 ### Subcommands
 
@@ -84,6 +85,20 @@ Environment variables:
 | `ZEDIATOR_LOG` | Tracing filter (e.g. `debug`); logging is off when unset |
 | `ZEDIATOR_LOG_FILE` | Log file path (default: `~/.local/state/zediator/zediator.log`) |
 | `ZEDIATOR_RUNTIME_DIR` | Socket directory override |
+
+## Debugging
+
+zediator never writes logs to the terminal (that would corrupt the wrapped
+TUI). To investigate any misbehavior:
+
+1. Run with `ZEDIATOR_LOG=debug` — all subsystems (screen-state changes,
+   title emissions, prefix-key actions, IPC injections, exports, hint
+   candidate counts) trace to the log file (`ZEDIATOR_LOG_FILE`, default
+   `~/.local/state/zediator/zediator.log`).
+2. Press `ctrl-] d` in the session to write a state dump — the primary
+   scrollback, the visible alternate-screen frame, screen-mode flags, and
+   the child's last title — to `$TMPDIR/zediator/state-<pid>-<n>.txt`.
+   Hint mode also dumps automatically when it finds no candidates.
 
 ## Notes and limitations
 

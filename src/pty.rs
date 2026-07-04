@@ -314,15 +314,46 @@ fn handle_action(
                 Err(err) => tracing::warn!(error = %err, "session export failed"),
             }
         }
+        crate::input::InputAction::DumpState => {
+            let message = match crate::debug::dump_state(tap, "manual dump (ctrl-] d)") {
+                Ok(path) => format!(
+                    "zediator: state dumped to {} (press any key)",
+                    path.display()
+                ),
+                Err(err) => format!("zediator: state dump failed: {err} (press any key)"),
+            };
+            let _gate = gate.lock().expect("stdout gate poisoned");
+            let mut stdout = io::stdout();
+            let _ = crate::hint::show_message(stdin, &mut stdout, &message);
+        }
         crate::input::InputAction::Hint => {
-            let lines = {
+            // Search the primary scrollback plus whatever is visible on the
+            // alternate screen (full-screen CLIs like Claude Code live there).
+            let (lines, alt_screen) = {
                 let guard = tap.lock().expect("tap lock poisoned");
-                guard.scrollback.recent(200)
+                let mut lines = guard.scrollback.recent(400);
+                lines.extend(guard.alt_snapshot.iter().cloned());
+                (lines, guard.alt_screen)
             };
             let cwd = std::env::current_dir().unwrap_or_else(|_| "/".into());
             let candidates = crate::hint::extract_candidates(&lines, &cwd, 40);
+            tracing::debug!(
+                window = lines.len(),
+                alt_screen,
+                candidates = candidates.len(),
+                "hint mode triggered"
+            );
             if candidates.is_empty() {
-                tracing::debug!("hint mode: no path candidates in scrollback");
+                let dump = crate::debug::dump_state(tap, "hint mode found no candidates")
+                    .map(|p| format!(" — state dumped to {}", p.display()))
+                    .unwrap_or_default();
+                let _gate = gate.lock().expect("stdout gate poisoned");
+                let mut stdout = io::stdout();
+                let _ = crate::hint::show_message(
+                    stdin,
+                    &mut stdout,
+                    &format!("zediator: no file paths found{dump} (press any key)"),
+                );
                 return;
             }
             // Holding the gate pauses the output pump so the child cannot

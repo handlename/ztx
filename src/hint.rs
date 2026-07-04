@@ -165,6 +165,24 @@ pub fn pick(
     selection
 }
 
+/// Shows a one-line message on the alternate screen and waits for any key.
+/// Used so hint mode never returns silently. The caller must hold the
+/// stdout gate, exactly as for [`pick`].
+pub fn show_message(
+    stdin: &mut impl Read,
+    stdout: &mut impl Write,
+    message: &str,
+) -> io::Result<()> {
+    stdout.write_all(b"\x1b[?1049h\x1b[H\x1b[2J\x1b[?25l")?;
+    stdout.write_all(message.as_bytes())?;
+    stdout.write_all(b"\r\n")?;
+    stdout.flush()?;
+    let mut byte = [0u8; 1];
+    let _ = stdin.read(&mut byte)?;
+    stdout.write_all(b"\x1b[?25h\x1b[?1049l")?;
+    stdout.flush()
+}
+
 fn read_selection(stdin: &mut impl Read, labels: &[String]) -> io::Result<Option<usize>> {
     let mut typed = String::new();
     let mut byte = [0u8; 1];

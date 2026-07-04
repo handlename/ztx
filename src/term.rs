@@ -1,9 +1,16 @@
 //! Output tap: observes the child's byte stream without modifying it.
 //!
-//! Design constraint (see DESIGN.md): zediator does not maintain a cell grid.
-//! It keeps an ANSI-stripped line buffer of the primary screen plus a few
-//! screen-state flags. This is enough for hint-mode path extraction and
-//! fallback Markdown export, at a fraction of a terminal emulator's cost.
+//! Design constraint (see DESIGN.md): zediator does not maintain a full
+//! terminal emulator. It keeps two lightweight views of the child's output:
+//!
+//! - **Primary screen**: an ANSI-stripped, append-oriented line buffer
+//!   ([`Scrollback`]). Ink-style bottom-region redraws (erase + cursor-up +
+//!   rewrite) are treated as replacements so frames do not flood the history.
+//! - **Alternate screen**: a bounded row grid ([`AltGrid`]) tracking what is
+//!   *currently visible*. Full-screen agent CLIs (Claude Code 2.x runs on the
+//!   alternate screen) keep their own scrollback internally, so the visible
+//!   frame is all zediator can — and needs to — capture for hint mode and
+//!   export snapshots.
 
 use std::collections::VecDeque;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -17,6 +24,9 @@ const RING_CAPACITY: usize = 10_000;
 /// Maximum bytes written to the spill file (64 MiB).
 const SPILL_CAP_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Upper bound for alternate-screen rows kept (top rows scroll away).
+const ALT_MAX_ROWS: usize = 500;
+
 /// State shared between the output pump thread (writer) and feature threads
 /// (hint, export, title — readers).
 pub struct TapShared {
@@ -25,6 +35,8 @@ pub struct TapShared {
     pub last_title: Option<String>,
     /// Whether the child is currently on the alternate screen.
     pub alt_screen: bool,
+    /// Text of the alternate screen as currently drawn (empty on primary).
+    pub alt_snapshot: Vec<String>,
 }
 
 impl TapShared {
@@ -33,6 +45,7 @@ impl TapShared {
             scrollback: Scrollback::new(ring_capacity),
             last_title: None,
             alt_screen: false,
+            alt_snapshot: Vec::new(),
         }
     }
 }
@@ -95,6 +108,16 @@ impl Scrollback {
         self.ring.iter().rev().take(n).rev().cloned().collect()
     }
 
+    /// Number of lines currently captured (ring only, spill excluded).
+    pub fn len(&self) -> usize {
+        self.ring.len()
+    }
+
+    /// Removes the most recent line (used when the child redraws it).
+    fn pop_last(&mut self) {
+        self.ring.pop_back();
+    }
+
     /// Returns the full captured history: spilled lines, then the ring.
     /// Notes how many lines were dropped when the spill cap was exceeded.
     pub fn dump(&mut self) -> std::io::Result<String> {
@@ -142,30 +165,127 @@ impl TermTap {
 
     pub fn advance(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.performer, bytes);
+        // Publish the alternate-screen text once per chunk (not per char).
+        self.performer.publish_alt_snapshot();
     }
 
     /// Commits a pending partial line, if any (call once when the child exits).
     pub fn flush(&mut self) {
-        if !self.performer.line.is_empty() {
+        if self.performer.alt.is_none() && !self.performer.line.is_empty() {
             self.performer.commit_line();
         }
+        self.performer.publish_alt_snapshot();
     }
 }
 
-/// Line-oriented interpretation of the output stream.
-///
-/// Cursor handling is deliberately minimal: `\r` rewinds within the current
-/// line (spinner redraws overwrite in place), `\n` commits, and erase-in-line
-/// truncates. Vertical cursor motion is ignored — full-frame TUI redraws on
-/// the primary screen may therefore appear as repeated blocks, which is
-/// acceptable for hint extraction (deduplicated) and fallback export.
+/// Row grid for the alternate screen. Rows grow on demand (no terminal-size
+/// plumbing); the top scrolls away beyond [`ALT_MAX_ROWS`]. Scroll regions
+/// and other exotic controls are ignored — the goal is readable text, not a
+/// pixel-perfect emulation.
+struct AltGrid {
+    rows: Vec<Vec<char>>,
+    row: usize,
+    col: usize,
+}
+
+impl AltGrid {
+    fn new() -> Self {
+        Self {
+            rows: vec![Vec::new()],
+            row: 0,
+            col: 0,
+        }
+    }
+
+    fn ensure_row(&mut self) {
+        while self.row >= self.rows.len() {
+            self.rows.push(Vec::new());
+        }
+        while self.rows.len() > ALT_MAX_ROWS {
+            self.rows.remove(0);
+            self.row = self.row.saturating_sub(1);
+        }
+    }
+
+    fn put(&mut self, c: char) {
+        self.ensure_row();
+        let line = &mut self.rows[self.row];
+        while line.len() < self.col {
+            line.push(' ');
+        }
+        if self.col < line.len() {
+            line[self.col] = c;
+        } else {
+            line.push(c);
+        }
+        self.col += 1;
+    }
+
+    fn move_to(&mut self, row: usize, col: usize) {
+        self.row = row.min(ALT_MAX_ROWS - 1);
+        self.col = col;
+        self.ensure_row();
+    }
+
+    fn erase_line(&mut self, mode: u16) {
+        self.ensure_row();
+        let col = self.col;
+        let line = &mut self.rows[self.row];
+        match mode {
+            0 => line.truncate(col),
+            1 => {
+                // ECMA-48: erase from line start THROUGH the cursor.
+                for i in 0..(col + 1).min(line.len()) {
+                    line[i] = ' ';
+                }
+            }
+            2 => line.clear(),
+            _ => {}
+        }
+    }
+
+    fn erase_display(&mut self, mode: u16) {
+        self.ensure_row();
+        match mode {
+            0 => {
+                self.erase_line(0);
+                self.rows.truncate(self.row + 1);
+            }
+            1 => {
+                for line in &mut self.rows[..self.row] {
+                    line.clear();
+                }
+                self.erase_line(1);
+            }
+            2 | 3 => {
+                for line in &mut self.rows {
+                    line.clear();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Current screen text, trailing blank rows trimmed.
+    fn lines(&self) -> Vec<String> {
+        let mut lines: Vec<String> = self.rows.iter().map(|r| r.iter().collect()).collect();
+        while lines.last().is_some_and(|l| l.trim().is_empty()) {
+            lines.pop();
+        }
+        lines
+    }
+}
+
+/// Line-oriented interpretation of the output stream. See the module docs
+/// for the primary/alternate split.
 struct Performer {
     shared: Arc<Mutex<TapShared>>,
+    /// Primary-screen partial line and cursor column.
     line: Vec<char>,
     col: usize,
-    /// Local copy of the alternate-screen flag. Only this thread mutates the
-    /// flag, so caching it avoids taking the mutex for every printed char.
-    alt_screen: bool,
+    /// Alternate-screen grid, present while the child is on the alt screen.
+    alt: Option<AltGrid>,
+    alt_dirty: bool,
 }
 
 impl Performer {
@@ -174,7 +294,8 @@ impl Performer {
             shared,
             line: Vec::new(),
             col: 0,
-            alt_screen: false,
+            alt: None,
+            alt_dirty: false,
         }
     }
 
@@ -182,9 +303,6 @@ impl Performer {
         let text: String = self.line.iter().collect();
         self.line.clear();
         self.col = 0;
-        if self.alt_screen {
-            return;
-        }
         self.shared
             .lock()
             .expect("tap lock poisoned")
@@ -193,18 +311,29 @@ impl Performer {
     }
 
     fn set_alt_screen(&mut self, on: bool) {
-        self.alt_screen = on;
+        // The primary partial line is kept: DECSET 1049 saves and restores
+        // the primary screen, so output resumes where it left off.
+        self.alt = on.then(AltGrid::new);
+        self.alt_dirty = true;
         self.shared.lock().expect("tap lock poisoned").alt_screen = on;
-        // Entering or leaving the alternate screen discards the partial line:
-        // it belongs to the screen being switched away from.
-        self.line.clear();
-        self.col = 0;
+        tracing::debug!(alt_screen = on, "screen mode changed");
+    }
+
+    fn publish_alt_snapshot(&mut self) {
+        if !self.alt_dirty {
+            return;
+        }
+        self.alt_dirty = false;
+        let snapshot = self.alt.as_ref().map(AltGrid::lines).unwrap_or_default();
+        self.shared.lock().expect("tap lock poisoned").alt_snapshot = snapshot;
     }
 }
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
-        if self.alt_screen {
+        if let Some(grid) = self.alt.as_mut() {
+            grid.put(c);
+            self.alt_dirty = true;
             return;
         }
         if self.col < self.line.len() {
@@ -216,6 +345,25 @@ impl Perform for Performer {
     }
 
     fn execute(&mut self, byte: u8) {
+        if let Some(grid) = self.alt.as_mut() {
+            match byte {
+                b'\n' => {
+                    grid.row += 1;
+                    grid.ensure_row();
+                }
+                b'\r' => grid.col = 0,
+                0x08 => grid.col = grid.col.saturating_sub(1),
+                b'\t' => {
+                    let next = (grid.col / 8 + 1) * 8;
+                    while grid.col < next {
+                        grid.put(' ');
+                    }
+                }
+                _ => return,
+            }
+            self.alt_dirty = true;
+            return;
+        }
         match byte {
             b'\n' => self.commit_line(),
             b'\r' => self.col = 0,
@@ -234,6 +382,7 @@ impl Perform for Performer {
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
         let mut iter = params.iter();
         let first = iter.next().and_then(|p| p.first().copied()).unwrap_or(0);
+        let second = iter.next().and_then(|p| p.first().copied()).unwrap_or(0);
 
         // DECSET/DECRST alternate screen (1047/1049, legacy 47).
         if intermediates.first() == Some(&b'?') && matches!(first, 47 | 1047 | 1049) {
@@ -244,8 +393,58 @@ impl Perform for Performer {
             }
             return;
         }
+        if !intermediates.is_empty() {
+            return;
+        }
 
-        if action == 'K' && !self.alt_screen {
+        if let Some(grid) = self.alt.as_mut() {
+            let n = first.max(1) as usize;
+            match action {
+                'H' | 'f' => grid.move_to(n - 1, (second.max(1) as usize) - 1),
+                'A' => grid.row = grid.row.saturating_sub(n),
+                'B' => {
+                    grid.row += n;
+                    grid.ensure_row();
+                }
+                'C' => grid.col += n,
+                'D' => grid.col = grid.col.saturating_sub(n),
+                'E' => {
+                    grid.row += n;
+                    grid.col = 0;
+                    grid.ensure_row();
+                }
+                'F' => {
+                    grid.row = grid.row.saturating_sub(n);
+                    grid.col = 0;
+                }
+                'G' => grid.col = n - 1,
+                'K' => grid.erase_line(first),
+                'J' => grid.erase_display(first),
+                _ => return,
+            }
+            self.alt_dirty = true;
+            return;
+        }
+
+        // Primary screen. Cursor up (CUU 'A') / cursor previous line
+        // (CPL 'F'): ink-style TUIs redraw their bottom region every frame by
+        // moving up over already-emitted lines and rewriting them. Treat
+        // those lines as *replaced*, not appended — otherwise redraw frames
+        // flood the scrollback and push real content out of the hint/export
+        // window.
+        if matches!(action, 'A' | 'F') {
+            let n = first.max(1) as usize;
+            let mut shared = self.shared.lock().expect("tap lock poisoned");
+            for _ in 0..n {
+                shared.scrollback.pop_last();
+            }
+            drop(shared);
+            self.line.clear();
+            self.col = 0;
+            return;
+        }
+
+        if action == 'K' {
             match first {
                 0 => self.line.truncate(self.col), // erase to end of line
                 1 => {
@@ -296,6 +495,10 @@ mod tests {
             .collect()
     }
 
+    fn snapshot(shared: &Arc<Mutex<TapShared>>) -> Vec<String> {
+        shared.lock().unwrap().alt_snapshot.clone()
+    }
+
     #[test]
     fn plain_lines_are_captured() {
         let shared = feed(b"hello\r\nworld\r\n");
@@ -322,6 +525,27 @@ mod tests {
     }
 
     #[test]
+    fn ink_style_redraw_replaces_lines_instead_of_appending() {
+        // Frame 1 commits three lines; the TUI then erases the bottom two
+        // (erase-line + cursor-up pairs) and draws frame 2 in their place.
+        let shared = feed(
+            b"content src/main.rs\nspinner A\nbox B\n\
+              \x1b[2K\x1b[1A\x1b[2K\x1b[1A\x1b[2K\
+              spinner C\nbox D\n",
+        );
+        assert_eq!(
+            lines(&shared),
+            ["content src/main.rs", "spinner C", "box D"]
+        );
+    }
+
+    #[test]
+    fn cursor_up_with_count_pops_that_many_lines() {
+        let shared = feed(b"keep\na\nb\nc\n\x1b[3Anew\n");
+        assert_eq!(lines(&shared), ["keep", "new"]);
+    }
+
+    #[test]
     fn erase_to_line_start_includes_cursor_column() {
         // After overwriting "XY" the cursor sits on column 2 ('c');
         // EL 1 erases columns 0..=2 inclusive.
@@ -330,9 +554,38 @@ mod tests {
     }
 
     #[test]
-    fn alternate_screen_content_is_ignored() {
+    fn alternate_screen_content_stays_out_of_scrollback() {
         let shared = feed(b"before\n\x1b[?1049hall tui stuff\nmore\n\x1b[?1049lafter\n");
         assert_eq!(lines(&shared), ["before", "after"]);
+    }
+
+    #[test]
+    fn alt_screen_snapshot_captures_visible_text() {
+        let shared = feed(b"\x1b[?1049h\x1b[2J\x1b[Hfirst src/main.rs\r\nsecond\x1b[3;1Hthird");
+        assert_eq!(snapshot(&shared), ["first src/main.rs", "second", "third"]);
+        assert!(shared.lock().unwrap().alt_screen);
+    }
+
+    #[test]
+    fn alt_screen_full_redraw_replaces_frame() {
+        let shared = feed(
+            b"\x1b[?1049h\x1b[Hframe one line\x1b[H\x1b[2Jframe two src/pty.rs\x1b[2;1Hstatus",
+        );
+        assert_eq!(snapshot(&shared), ["frame two src/pty.rs", "status"]);
+    }
+
+    #[test]
+    fn leaving_alt_screen_clears_snapshot() {
+        let shared = feed(b"\x1b[?1049h\x1b[Htransient\x1b[?1049lback\n");
+        assert!(snapshot(&shared).is_empty());
+        assert!(!shared.lock().unwrap().alt_screen);
+        assert_eq!(lines(&shared), ["back"]);
+    }
+
+    #[test]
+    fn alt_screen_erase_below_truncates_rows() {
+        let shared = feed(b"\x1b[?1049h\x1b[Ha\r\nb\r\nc\x1b[2;1H\x1b[0J");
+        assert_eq!(snapshot(&shared), ["a"]);
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub enum InputAction {
     Export,
     /// `prefix + f`: enter hint mode (file-path picking).
     Hint,
+    /// `prefix + d`: dump internal state for diagnostics.
+    DumpState,
 }
 
 /// Splits the stdin stream into bytes for the child and zediator actions.
@@ -40,6 +42,7 @@ impl InputFilter {
                 match byte {
                     b'e' => actions.push(InputAction::Export),
                     b'f' => actions.push(InputAction::Hint),
+                    b'd' => actions.push(InputAction::DumpState),
                     b if b == self.prefix => out.push(self.prefix), // literal
                     other => {
                         out.push(self.prefix);

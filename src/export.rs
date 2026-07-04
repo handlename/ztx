@@ -84,11 +84,14 @@ fn push_text(body: &mut String, text: &str) {
     body.push_str("\n\n");
 }
 
-/// Renders the PTY scrollback as fallback Markdown.
+/// Renders the PTY scrollback as fallback Markdown, plus a snapshot of the
+/// alternate screen when the child currently lives there (full-screen CLIs
+/// keep their history internally, so only the visible frame is available).
 pub fn scrollback_to_markdown(shared: &Arc<Mutex<TapShared>>) -> String {
     let mut guard = shared.lock().expect("tap lock poisoned");
     let dump = guard.scrollback.dump().unwrap_or_default();
     let title = guard.last_title.clone();
+    let alt_snapshot = guard.alt_snapshot.clone();
     drop(guard);
 
     let mut out = String::from("# Session log (terminal capture)\n\n");
@@ -96,11 +99,19 @@ pub fn scrollback_to_markdown(shared: &Arc<Mutex<TapShared>>) -> String {
         out.push_str(&format!("Session: {title}\n\n"));
     }
     out.push_str(
-        "> Captured from terminal output. Content shown on the alternate \
-         screen (full-screen TUIs) is not included.\n\n```text\n",
+        "> Captured from terminal output. For full-screen TUIs only the \
+         currently visible frame is available (see the last section).\n\n```text\n",
     );
     out.push_str(&dump);
     out.push_str("```\n");
+    if !alt_snapshot.is_empty() {
+        out.push_str("\n## Current screen\n\n```text\n");
+        for line in &alt_snapshot {
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str("```\n");
+    }
     out
 }
 
@@ -252,12 +263,22 @@ mod tests {
     }
 
     #[test]
-    fn scrollback_fallback_notes_alt_screen_gap() {
+    fn scrollback_fallback_includes_primary_capture() {
         let shared = crate::term::TermTap::shared(Some(8));
         let mut tap = crate::term::TermTap::new(shared.clone());
         tap.advance(b"line one\nline two\n");
         let md = scrollback_to_markdown(&shared);
-        assert!(md.contains("alternate"));
         assert!(md.contains("line one\nline two\n"));
+        assert!(!md.contains("## Current screen"));
+    }
+
+    #[test]
+    fn scrollback_fallback_appends_visible_alt_frame() {
+        let shared = crate::term::TermTap::shared(Some(8));
+        let mut tap = crate::term::TermTap::new(shared.clone());
+        tap.advance(b"before\n\x1b[?1049h\x1b[Hvisible frame src/x.rs");
+        let md = scrollback_to_markdown(&shared);
+        assert!(md.contains("## Current screen"));
+        assert!(md.contains("visible frame src/x.rs"));
     }
 }
