@@ -91,8 +91,6 @@ impl Scrollback {
     }
 
     /// Returns up to `n` most recent lines (oldest first).
-    // TODO(step 6): consumed by hint mode; drop the allow once wired.
-    #[allow(dead_code)]
     pub fn recent(&self, n: usize) -> Vec<String> {
         self.ring.iter().rev().take(n).rev().cloned().collect()
     }

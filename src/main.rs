@@ -1,6 +1,7 @@
 mod adapter;
 mod cli;
 mod export;
+mod hint;
 mod input;
 mod logging;
 mod pty;

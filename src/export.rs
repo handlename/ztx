@@ -139,6 +139,37 @@ pub fn open_in_editor(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Opens a specific location in the editor. Zed understands the
+/// `path:line:column` form; other editors receive the bare path.
+pub fn open_location(path: &Path, line: Option<u32>, column: Option<u32>) -> io::Result<()> {
+    let editor = editor_command();
+    let (program, args) = editor
+        .split_first()
+        .ok_or_else(|| io::Error::other("no editor available (set ZEDIATOR_EDITOR or EDITOR)"))?;
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args);
+    let is_zed = Path::new(program)
+        .file_name()
+        .is_some_and(|name| name == "zed");
+    match (is_zed, line) {
+        (true, Some(line)) => {
+            let mut target = format!("{}:{line}", path.display());
+            if let Some(column) = column {
+                target.push_str(&format!(":{column}"));
+            }
+            cmd.arg(target);
+        }
+        _ => {
+            cmd.arg(path);
+        }
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(())
+}
+
 fn editor_command() -> Vec<String> {
     if let Ok(cmd) = std::env::var("ZEDIATOR_EDITOR")
         && !cmd.is_empty()

@@ -108,6 +108,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let input_is_tty = io::stdin().is_terminal();
     let adapter_for_input = adapter.clone();
     let tap_for_input = tap_shared.clone();
+    let gate_for_input = stdout_gate.clone();
     thread::spawn(move || {
         let mut stdin = io::stdin().lock();
         let mut buf = [0u8; IO_BUF_SIZE];
@@ -134,7 +135,13 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                         break;
                     }
                     for action in actions {
-                        handle_action(action, &adapter_for_input, &tap_for_input);
+                        handle_action(
+                            action,
+                            &adapter_for_input,
+                            &tap_for_input,
+                            &gate_for_input,
+                            &mut stdin,
+                        );
                     }
                 }
             }
@@ -249,12 +256,15 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
 
 type SharedAdapter = Arc<Mutex<Option<Box<dyn crate::adapter::Adapter>>>>;
 
-/// Executes a prefix-key action. Runs on the stdin thread; must never write
-/// to the terminal (that would corrupt the child's screen).
+/// Executes a prefix-key action. Runs on the stdin thread. Terminal writes
+/// are only allowed while holding the stdout gate (hint overlay); everything
+/// else must stay silent to keep the child's screen intact.
 fn handle_action(
     action: crate::input::InputAction,
     adapter: &SharedAdapter,
     tap: &Arc<Mutex<TapShared>>,
+    gate: &Arc<Mutex<()>>,
+    stdin: &mut impl Read,
 ) {
     tracing::debug!(?action, "prefix action triggered");
     match action {
@@ -274,8 +284,35 @@ fn handle_action(
             }
         }
         crate::input::InputAction::Hint => {
-            // TODO(step 6): hint mode.
-            tracing::debug!("hint mode requested (not implemented yet)");
+            let lines = {
+                let guard = tap.lock().expect("tap lock poisoned");
+                guard.scrollback.recent(200)
+            };
+            let cwd = std::env::current_dir().unwrap_or_else(|_| "/".into());
+            let candidates = crate::hint::extract_candidates(&lines, &cwd, 40);
+            if candidates.is_empty() {
+                tracing::debug!("hint mode: no path candidates in scrollback");
+                return;
+            }
+            // Holding the gate pauses the output pump so the child cannot
+            // repaint over the overlay; PTY backpressure holds its output.
+            let _gate = gate.lock().expect("stdout gate poisoned");
+            let mut stdout = io::stdout();
+            match crate::hint::pick(stdin, &mut stdout, &candidates) {
+                Ok(Some(index)) => {
+                    let chosen = &candidates[index];
+                    match crate::export::open_location(&chosen.path, chosen.line, chosen.column) {
+                        Ok(()) => tracing::info!(
+                            path = %chosen.path.display(),
+                            line = ?chosen.line,
+                            "opened location from hint mode"
+                        ),
+                        Err(err) => tracing::warn!(error = %err, "failed to open location"),
+                    }
+                }
+                Ok(None) => tracing::debug!("hint mode cancelled"),
+                Err(err) => tracing::warn!(error = %err, "hint mode failed"),
+            }
         }
     }
 }
