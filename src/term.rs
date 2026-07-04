@@ -99,8 +99,6 @@ impl Scrollback {
 
     /// Returns the full captured history: spilled lines, then the ring.
     /// Notes how many lines were dropped when the spill cap was exceeded.
-    // TODO(step 5): consumed by fallback export; drop the allow once wired.
-    #[allow(dead_code)]
     pub fn dump(&mut self) -> std::io::Result<String> {
         let mut out = String::new();
         if self.dropped > 0 {

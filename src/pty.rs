@@ -54,9 +54,16 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let _raw_mode = crate::term_guard::RawModeGuard::new(io::stdin().is_terminal())?;
 
     // Adapter and effective title mode. `managed` is the default only when an
-    // adapter is available to supply meaningful titles.
-    let adapter = crate::adapter::resolve(opts.adapter, command, child_pid);
-    let title_mode = opts.title_mode.unwrap_or(if adapter.is_some() {
+    // adapter is available to supply meaningful titles. The adapter is shared
+    // between the title thread (activity polling) and the input thread
+    // (transcript export).
+    let adapter = Arc::new(Mutex::new(crate::adapter::resolve(
+        opts.adapter,
+        command,
+        child_pid,
+    )));
+    let has_adapter = adapter.lock().expect("adapter lock poisoned").is_some();
+    let title_mode = opts.title_mode.unwrap_or(if has_adapter {
         TitleMode::Managed
     } else {
         TitleMode::Passthrough
@@ -93,20 +100,41 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         }
     });
 
-    // stdin -> child. Left detached: reads from stdin cannot be interrupted
-    // portably, and the thread dies with the process.
+    let tap_shared: Arc<Mutex<TapShared>> = TermTap::shared(None);
+
+    // stdin -> child, with zediator's prefix-key bindings peeled off when the
+    // input is interactive. Left detached: reads from stdin cannot be
+    // interrupted portably, and the thread dies with the process.
+    let input_is_tty = io::stdin().is_terminal();
+    let adapter_for_input = adapter.clone();
+    let tap_for_input = tap_shared.clone();
     thread::spawn(move || {
         let mut stdin = io::stdin().lock();
         let mut buf = [0u8; IO_BUF_SIZE];
+        tracing::debug!(interactive = input_is_tty, "stdin pump started");
+        let mut filter = input_is_tty.then(|| crate::input::InputFilter::new(crate::input::DEFAULT_PREFIX));
+        let mut forwarded = Vec::with_capacity(IO_BUF_SIZE);
         loop {
             match stdin.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if child_input.write_all(&buf[..n]).is_err() {
+                    let (bytes, actions): (&[u8], Vec<crate::input::InputAction>) =
+                        match filter.as_mut() {
+                            Some(filter) => {
+                                forwarded.clear();
+                                let actions = filter.feed(&buf[..n], &mut forwarded);
+                                (&forwarded, actions)
+                            }
+                            None => (&buf[..n], Vec::new()),
+                        };
+                    if !bytes.is_empty()
+                        && (child_input.write_all(bytes).is_err()
+                            || child_input.flush().is_err())
+                    {
                         break;
                     }
-                    if child_input.flush().is_err() {
-                        break;
+                    for action in actions {
+                        handle_action(action, &adapter_for_input, &tap_for_input);
                     }
                 }
             }
@@ -117,7 +145,6 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     // The title filter transforms bytes on the way out; the tap observes the
     // ORIGINAL bytes (so suppressed child titles are still recorded), after
     // forwarding, so parsing never delays the passthrough.
-    let tap_shared: Arc<Mutex<TapShared>> = TermTap::shared(None);
     let mut tap = TermTap::new(tap_shared.clone());
     let mut filter = TitleFilter::new(title_mode, title_prefix);
     let gate_for_pump = stdout_gate.clone();
@@ -162,7 +189,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         let stop = title_stop.clone();
         let gate = stdout_gate.clone();
         let tap = tap_shared.clone();
-        let mut adapter = adapter;
+        let adapter = adapter.clone();
         let initial = Path::new(&command[0])
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -191,6 +218,8 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                     continue;
                 }
                 let title = adapter
+                    .lock()
+                    .expect("adapter lock poisoned")
                     .as_mut()
                     .and_then(|a| a.current_activity())
                     .or_else(|| tap.lock().expect("tap lock poisoned").last_title.clone());
@@ -216,6 +245,39 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
 
     tracing::debug!(exit_code = status.exit_code(), "child exited");
     Ok(status.exit_code())
+}
+
+type SharedAdapter = Arc<Mutex<Option<Box<dyn crate::adapter::Adapter>>>>;
+
+/// Executes a prefix-key action. Runs on the stdin thread; must never write
+/// to the terminal (that would corrupt the child's screen).
+fn handle_action(
+    action: crate::input::InputAction,
+    adapter: &SharedAdapter,
+    tap: &Arc<Mutex<TapShared>>,
+) {
+    tracing::debug!(?action, "prefix action triggered");
+    match action {
+        crate::input::InputAction::Export => {
+            let markdown = adapter
+                .lock()
+                .expect("adapter lock poisoned")
+                .as_mut()
+                .and_then(|a| a.transcript_path())
+                .and_then(|path| crate::export::transcript_to_markdown(&path).ok())
+                .unwrap_or_else(|| crate::export::scrollback_to_markdown(tap));
+            let result = crate::export::write_export(&markdown)
+                .and_then(|path| crate::export::open_in_editor(&path).map(|()| path));
+            match result {
+                Ok(path) => tracing::info!(path = %path.display(), "exported session log"),
+                Err(err) => tracing::warn!(error = %err, "session export failed"),
+            }
+        }
+        crate::input::InputAction::Hint => {
+            // TODO(step 6): hint mode.
+            tracing::debug!("hint mode requested (not implemented yet)");
+        }
+    }
 }
 
 /// Reports the current terminal size, falling back to 80x24 when unavailable

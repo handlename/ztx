@@ -23,8 +23,6 @@ use super::Adapter;
 #[derive(Debug, Deserialize)]
 struct SessionMeta {
     pid: Option<u32>,
-    // TODO(step 5): read by the export subcommand; drop the allow then.
-    #[allow(dead_code)]
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
     cwd: Option<String>,
@@ -33,8 +31,6 @@ struct SessionMeta {
 
 pub struct ClaudeCodeAdapter {
     sessions_dir: PathBuf,
-    // TODO(step 5): read by the export subcommand; drop the allow then.
-    #[allow(dead_code)]
     projects_dir: PathBuf,
     child_pid: Option<u32>,
     cwd: PathBuf,
@@ -50,6 +46,14 @@ impl ClaudeCodeAdapter {
             claude_dir.join("projects"),
             child_pid,
         )
+    }
+
+    /// Constructor for the standalone `export` subcommand: no child process
+    /// exists, so sessions are matched purely by cwd regardless of age.
+    pub fn for_export() -> Self {
+        let mut adapter = Self::from_env(None);
+        adapter.started_at = SystemTime::UNIX_EPOCH;
+        adapter
     }
 
     pub fn new(sessions_dir: PathBuf, projects_dir: PathBuf, child_pid: Option<u32>) -> Self {
@@ -123,8 +127,6 @@ fn read_meta(path: &Path) -> Option<SessionMeta> {
 
 /// Claude Code stores transcripts under a directory named after the project
 /// cwd with every path separator (and dot) replaced by `-`.
-// TODO(step 5): called via transcript_path from export; drop the allow then.
-#[allow(dead_code)]
 fn project_slug(cwd: &Path) -> String {
     cwd.to_string_lossy()
         .chars()

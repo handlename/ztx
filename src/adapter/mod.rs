@@ -32,13 +32,15 @@ pub trait Adapter: Send {
 
     /// Path to the CLI's native transcript for the current session, if the
     /// adapter can locate one (consumed by `export`).
-    // TODO(step 5): consumed by the export subcommand; drop the allow then.
-    #[allow(dead_code)]
     fn transcript_path(&mut self) -> Option<std::path::PathBuf>;
 }
 
 /// Resolves an adapter for `command` (the argv of the wrapped CLI).
-pub fn resolve(kind: AdapterKind, command: &[String], child_pid: Option<u32>) -> Option<Box<dyn Adapter>> {
+pub fn resolve(
+    kind: AdapterKind,
+    command: &[String],
+    child_pid: Option<u32>,
+) -> Option<Box<dyn Adapter>> {
     let program = command.first().map(|c| basename(c))?;
     match kind {
         AdapterKind::None => None,
@@ -47,6 +49,15 @@ pub fn resolve(kind: AdapterKind, command: &[String], child_pid: Option<u32>) ->
             "claude" => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid))),
             _ => None,
         },
+    }
+}
+
+/// Resolves an adapter for the standalone `export` subcommand, which runs
+/// outside any wrapper process and matches sessions by cwd.
+pub fn resolve_for_export(kind: AdapterKind) -> Option<Box<dyn Adapter>> {
+    match kind {
+        AdapterKind::None => None,
+        AdapterKind::Auto | AdapterKind::Claude => Some(Box::new(ClaudeCodeAdapter::for_export())),
     }
 }
 

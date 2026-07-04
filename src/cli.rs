@@ -29,6 +29,19 @@ pub enum Command {
         #[arg(required = true, trailing_var_arg = true)]
         command: Vec<String>,
     },
+
+    /// Export the latest session transcript for this directory as Markdown.
+    /// (Inside a running wrapper, `ctrl-] e` exports the live session,
+    /// including the PTY-capture fallback.)
+    Export {
+        /// CLI-specific adapter selection
+        #[arg(long, value_enum, default_value_t)]
+        adapter: crate::adapter::AdapterKind,
+
+        /// Write the Markdown to stdout instead of opening an editor
+        #[arg(long)]
+        stdout: bool,
+    },
 }
 
 #[cfg(test)]
@@ -38,7 +51,9 @@ mod tests {
     #[test]
     fn parses_run_with_trailing_args() {
         let cli = Cli::try_parse_from(["zediator", "run", "--", "claude", "--continue"]).unwrap();
-        let Command::Run { command, .. } = cli.command;
+        let Command::Run { command, .. } = cli.command else {
+            panic!("expected run subcommand");
+        };
         assert_eq!(command, vec!["claude", "--continue"]);
     }
 
@@ -59,7 +74,10 @@ mod tests {
             title_mode,
             adapter,
             ..
-        } = cli.command;
+        } = cli.command
+        else {
+            panic!("expected run subcommand");
+        };
         assert_eq!(title_mode, Some(crate::title::TitleMode::Managed));
         assert_eq!(adapter, crate::adapter::AdapterKind::Claude);
     }
