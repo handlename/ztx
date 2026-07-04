@@ -42,6 +42,53 @@ pub enum Command {
         #[arg(long)]
         stdout: bool,
     },
+
+    /// Send a file reference / selected text into a running session
+    /// (designed to be called from a Zed task with $ZED_* variables)
+    Send {
+        /// File to reference (e.g. $ZED_RELATIVE_FILE)
+        #[arg(long)]
+        file: Option<String>,
+
+        /// Line number to reference (e.g. $ZED_ROW)
+        #[arg(long)]
+        line: Option<u32>,
+
+        /// Selected text to attach as a fenced block (e.g. $ZED_SELECTED_TEXT)
+        #[arg(long)]
+        text: Option<String>,
+
+        /// Target session by wrapper pid (see `zediator sessions`)
+        #[arg(long)]
+        pid: Option<u32>,
+
+        /// Target session by explicit socket path
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
+
+        /// Free-form message text
+        #[arg(trailing_var_arg = true)]
+        message: Vec<String>,
+    },
+
+    /// List running zediator sessions
+    Sessions,
+
+    /// Generate editor integration (keybinding + task) for zediator
+    Setup {
+        #[command(subcommand)]
+        target: SetupTarget,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SetupTarget {
+    /// Merge a zediator task and keybinding into the Zed configuration
+    Zed {
+        /// Apply changes without asking for confirmation
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[cfg(test)]

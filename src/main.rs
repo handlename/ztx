@@ -3,8 +3,10 @@ mod cli;
 mod export;
 mod hint;
 mod input;
+mod ipc;
 mod logging;
 mod pty;
+mod setup;
 mod term;
 mod term_guard;
 mod title;
@@ -38,14 +40,60 @@ fn main() -> ExitCode {
                 }
             }
         }
-        cli::Command::Export { adapter, stdout } => match run_export(adapter, stdout) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(err) => {
-                eprintln!("zediator: {err}");
-                ExitCode::FAILURE
-            }
+        cli::Command::Export { adapter, stdout } => report(run_export(adapter, stdout)),
+        cli::Command::Send {
+            file,
+            line,
+            text,
+            pid,
+            socket,
+            message,
+        } => report(run_send(file, line, text, pid, socket, message)),
+        cli::Command::Sessions => report(run_sessions()),
+        cli::Command::Setup { target } => match target {
+            cli::SetupTarget::Zed { yes } => report(setup::zed(yes)),
         },
     }
+}
+
+fn report(result: std::io::Result<()>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("zediator: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_send(
+    file: Option<String>,
+    line: Option<u32>,
+    text: Option<String>,
+    pid: Option<u32>,
+    socket: Option<std::path::PathBuf>,
+    message: Vec<String>,
+) -> std::io::Result<()> {
+    let payload = ipc::compose_message(file.as_deref(), line, text.as_deref(), &message);
+    if payload.is_empty() {
+        return Err(std::io::Error::other(
+            "nothing to send (pass --file/--text or a message)",
+        ));
+    }
+    let target = ipc::resolve_socket(pid, socket)?;
+    ipc::send(&target, &payload)
+}
+
+fn run_sessions() -> std::io::Result<()> {
+    let sessions = ipc::list_sessions();
+    if sessions.is_empty() {
+        println!("no running zediator sessions ({})", ipc::socket_dir().display());
+        return Ok(());
+    }
+    for (pid, alive) in sessions {
+        println!("{pid}\t{}", if alive { "alive" } else { "stale" });
+    }
+    Ok(())
 }
 
 fn run_export(kind: adapter::AdapterKind, to_stdout: bool) -> std::io::Result<()> {

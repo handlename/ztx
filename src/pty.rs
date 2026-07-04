@@ -48,7 +48,10 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let child_pid = child.process_id();
     let master = pair.master;
     let mut child_output = master.try_clone_reader().map_err(io::Error::other)?;
-    let mut child_input = master.take_writer().map_err(io::Error::other)?;
+    // The child's input is shared between the stdin pump and the IPC server.
+    let child_writer: crate::ipc::SharedWriter = Arc::new(Mutex::new(
+        master.take_writer().map_err(io::Error::other)?,
+    ));
 
     tracing::debug!(command = ?command, child_pid = ?child.process_id(), "spawned child in PTY");
     let _raw_mode = crate::term_guard::RawModeGuard::new(io::stdin().is_terminal())?;
@@ -102,6 +105,16 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
 
     let tap_shared: Arc<Mutex<TapShared>> = TermTap::shared(None);
 
+    // IPC socket for `zediator send`. Failure is non-fatal: everything else
+    // works without the selection-sharing channel.
+    let _ipc = match crate::ipc::IpcServer::start(child_writer.clone()) {
+        Ok(server) => Some(server),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to start IPC socket");
+            None
+        }
+    };
+
     // stdin -> child, with zediator's prefix-key bindings peeled off when the
     // input is interactive. Left detached: reads from stdin cannot be
     // interrupted portably, and the thread dies with the process.
@@ -109,6 +122,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let adapter_for_input = adapter.clone();
     let tap_for_input = tap_shared.clone();
     let gate_for_input = stdout_gate.clone();
+    let child_input = child_writer.clone();
     thread::spawn(move || {
         let mut stdin = io::stdin().lock();
         let mut buf = [0u8; IO_BUF_SIZE];
@@ -128,11 +142,11 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                             }
                             None => (&buf[..n], Vec::new()),
                         };
-                    if !bytes.is_empty()
-                        && (child_input.write_all(bytes).is_err()
-                            || child_input.flush().is_err())
-                    {
-                        break;
+                    if !bytes.is_empty() {
+                        let mut writer = child_input.lock().expect("child writer poisoned");
+                        if writer.write_all(bytes).is_err() || writer.flush().is_err() {
+                            break;
+                        }
                     }
                     for action in actions {
                         handle_action(
