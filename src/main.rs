@@ -1,11 +1,16 @@
 mod cli;
+mod logging;
 mod pty;
+mod term_guard;
 
 use std::process::ExitCode;
 
 use clap::Parser;
 
 fn main() -> ExitCode {
+    let _log_guard = logging::init();
+    term_guard::install_panic_hook();
+
     let args = cli::Cli::parse();
     match args.command {
         cli::Command::Run { command } => match pty::run(&command) {

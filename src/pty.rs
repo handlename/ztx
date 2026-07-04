@@ -29,10 +29,8 @@ pub fn run(command: &[String]) -> io::Result<u32> {
     let mut child_output = master.try_clone_reader().map_err(io::Error::other)?;
     let mut child_input = master.take_writer().map_err(io::Error::other)?;
 
-    let raw_mode = io::stdin().is_terminal();
-    if raw_mode {
-        crossterm::terminal::enable_raw_mode()?;
-    }
+    tracing::debug!(command = ?command, child_pid = ?child.process_id(), "spawned child in PTY");
+    let _raw_mode = crate::term_guard::RawModeGuard::new(io::stdin().is_terminal())?;
 
     // Resize events and termination signals are handled on a dedicated thread.
     // The PTY master must live there for TIOCSWINSZ, so it moves into the closure.
@@ -98,10 +96,7 @@ pub fn run(command: &[String]) -> io::Result<u32> {
     signal_handle.close();
     let _ = signal_thread.join();
 
-    if raw_mode {
-        crossterm::terminal::disable_raw_mode()?;
-    }
-
+    tracing::debug!(exit_code = status.exit_code(), "child exited");
     Ok(status.exit_code())
 }
 
