@@ -1,8 +1,10 @@
+mod adapter;
 mod cli;
 mod logging;
 mod pty;
 mod term;
 mod term_guard;
+mod title;
 
 use std::process::ExitCode;
 
@@ -14,12 +16,24 @@ fn main() -> ExitCode {
 
     let args = cli::Cli::parse();
     match args.command {
-        cli::Command::Run { command } => match pty::run(&command) {
-            Ok(code) => ExitCode::from(code.min(u8::MAX as u32) as u8),
-            Err(err) => {
-                eprintln!("zediator: {err}");
-                ExitCode::FAILURE
+        cli::Command::Run {
+            title_mode,
+            title_prefix,
+            adapter,
+            command,
+        } => {
+            let opts = pty::RunOptions {
+                title_mode,
+                title_prefix,
+                adapter,
+            };
+            match pty::run(&command, opts) {
+                Ok(code) => ExitCode::from(code.min(u8::MAX as u32) as u8),
+                Err(err) => {
+                    eprintln!("zediator: {err}");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
     }
 }
