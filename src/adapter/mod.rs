@@ -4,10 +4,12 @@
 //! known CLIs (session titles, structured transcript export). When no adapter
 //! matches, every feature falls back to PTY-recording quality.
 
+mod antigravity;
 mod claude;
 
 use std::path::Path;
 
+pub use antigravity::AntigravityAdapter;
 pub use claude::ClaudeCodeAdapter;
 
 /// Which adapter to use for the wrapped CLI.
@@ -18,6 +20,8 @@ pub enum AdapterKind {
     Auto,
     /// Claude Code (`claude`).
     Claude,
+    /// antigravity-cli (`agy`).
+    Antigravity,
     /// No adapter: PTY-recording fallback quality for every feature.
     None,
 }
@@ -45,8 +49,10 @@ pub fn resolve(
     match kind {
         AdapterKind::None => None,
         AdapterKind::Claude => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid))),
+        AdapterKind::Antigravity => Some(Box::new(AntigravityAdapter::from_env())),
         AdapterKind::Auto => match program {
             "claude" => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid))),
+            "agy" | "antigravity" => Some(Box::new(AntigravityAdapter::from_env())),
             _ => None,
         },
     }
@@ -58,6 +64,8 @@ pub fn resolve_for_export(kind: AdapterKind) -> Option<Box<dyn Adapter>> {
     match kind {
         AdapterKind::None => None,
         AdapterKind::Auto | AdapterKind::Claude => Some(Box::new(ClaudeCodeAdapter::for_export())),
+        // agy exposes no native transcript; see the antigravity module docs.
+        AdapterKind::Antigravity => Some(Box::new(AntigravityAdapter::from_env())),
     }
 }
 
