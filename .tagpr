@@ -1,0 +1,6 @@
+[tagpr]
+    releaseBranch = main
+    versionFile = Cargo.toml
+    vPrefix = true
+    release = draft
+    command = cargo check
