@@ -1,0 +1,61 @@
+# AGENTS.md
+
+Guidance for AI agents (and humans) working on this repository.
+
+## Project
+
+zediator — a Rust PTY-proxy wrapper improving the fit between Zed terminal
+sessions and AI agent CLIs. Read `README.md` (usage), `DESIGN.md`
+(architecture), `REQUIREMENTS.md` (scope), `GLOSSARY.md` (terms) first.
+
+## Build, test, lint
+
+Rust is provisioned via mise (`mise.toml`); prefix commands with
+`mise exec --` if cargo is not on PATH.
+
+```sh
+cargo build
+cargo test
+cargo clippy --all-targets -- -D warnings   # CI-enforced
+cargo fmt --all --check                     # CI-enforced
+```
+
+All three must pass before a change is considered done.
+
+## Version control
+
+- This is a **jujutsu (jj) colocated repo**. Use jj, not raw git.
+- Describe first: `jj desc -m "..."` before coding, `jj new -m "..."` to
+  start the next change. One logical change per commit.
+- Commit messages: English, Conventional Commits (`feat:`, `fix:`, `chore:`,
+  `docs:`).
+- Commits are GPG-signed via 1Password; if signing fails, stop and ask the
+  user to unlock 1Password.
+
+## Conventions
+
+- Documentation and code comments are **English**.
+- Comments explain constraints the code cannot show; no redundant narration.
+- Module-level `//!` docs carry the design context for each module.
+- Undocumented external state (Claude Code / agy files) must be read
+  defensively: parse failures return `None`, never panic — the wrapper must
+  keep running when adapters break.
+- Never write to stdout/stderr while the child is running (it corrupts the
+  child's screen). Use `tracing` (`ZEDIATOR_LOG=debug`, file-based).
+
+## Testing notes
+
+- Interactive behavior is tested with `/usr/bin/expect` driving the real
+  binary (see the PTY passthrough and hint-mode checks in the history).
+  Beware Tcl's `\x` escape: `send "\x1de"` sends U+01DE, not `ctrl-]` + `e`;
+  split into two `send` calls.
+- `ZEDIATOR_RUNTIME_DIR`, `ZEDIATOR_ZED_CONFIG_DIR`, `ZEDIATOR_EDITOR`, and
+  `ZEDIATOR_LOG_FILE` exist so tests never touch real user state.
+- Verify features against real data when possible (a real Claude Code
+  transcript exists for this repo's cwd).
+
+## Release
+
+tagpr manages releases: merging the tagpr-generated PR tags a version and
+`release.yml` builds and uploads binaries (macOS/Linux, x86_64/aarch64),
+then publishes the draft release. Requires the `GH_PAT` repository secret.
