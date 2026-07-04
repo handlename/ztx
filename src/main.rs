@@ -1,6 +1,7 @@
 mod cli;
 mod logging;
 mod pty;
+mod term;
 mod term_guard;
 
 use std::process::ExitCode;

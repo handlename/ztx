@@ -1,9 +1,12 @@
 use std::io::{self, IsTerminal, Read, Write};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM, SIGWINCH};
 use signal_hook::iterator::Signals;
+
+use crate::term::{TapShared, TermTap};
 
 const IO_BUF_SIZE: usize = 8192;
 
@@ -73,6 +76,10 @@ pub fn run(command: &[String]) -> io::Result<u32> {
     });
 
     // child -> stdout. Joined after the child exits to drain remaining output.
+    // The tap observes bytes after they are forwarded so parsing never delays
+    // the passthrough.
+    let tap_shared: Arc<Mutex<TapShared>> = TermTap::shared(None);
+    let mut tap = TermTap::new(tap_shared.clone());
     let output_thread = thread::spawn(move || {
         let mut stdout = io::stdout().lock();
         let mut buf = [0u8; IO_BUF_SIZE];
@@ -86,9 +93,11 @@ pub fn run(command: &[String]) -> io::Result<u32> {
                     if stdout.flush().is_err() {
                         break;
                     }
+                    tap.advance(&buf[..n]);
                 }
             }
         }
+        tap.flush();
     });
 
     let status = child.wait().map_err(io::Error::other)?;
