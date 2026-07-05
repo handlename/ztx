@@ -328,22 +328,51 @@ fn handle_action(
             let _ = crate::hint::show_message(stdin, &mut stdout, &message, &mouse_modes);
         }
         crate::input::InputAction::Hint => {
-            // Search the primary scrollback plus whatever is visible on the
-            // alternate screen (full-screen CLIs like Claude Code live there).
-            let (lines, alt_screen, mouse_modes) = {
+            let (scroll_lines, alt_rows, alt_screen, mouse_modes) = {
                 let guard = tap.lock().expect("tap lock poisoned");
-                let mut lines = guard.scrollback.recent(400);
-                lines.extend(guard.alt_snapshot.iter().cloned());
-                let modes: Vec<u16> = guard.mouse_modes.iter().copied().collect();
-                (lines, guard.alt_screen, modes)
+                (
+                    guard.scrollback.recent(400),
+                    guard.alt_snapshot.clone(),
+                    guard.alt_screen,
+                    guard.mouse_modes.iter().copied().collect::<Vec<u16>>(),
+                )
             };
             let cwd = std::env::current_dir().unwrap_or_else(|_| "/".into());
+
+            // Full-screen sessions: paint labels in place, directly over the
+            // path positions on the visible frame. Holding the gate pauses
+            // the output pump so the child cannot repaint over the labels.
+            if alt_screen {
+                let hints = crate::hint::extract_screen_hints(&alt_rows, &cwd, 26);
+                if !hints.is_empty() {
+                    tracing::debug!(hints = hints.len(), "hint mode (in-place overlay)");
+                    let _gate = gate.lock().expect("stdout gate poisoned");
+                    let mut stdout = io::stdout();
+                    match crate::hint::pick_overlay(
+                        stdin,
+                        &mut stdout,
+                        &hints,
+                        &alt_rows,
+                        &mouse_modes,
+                    ) {
+                        Ok(Some(index)) => open_candidate(&hints[index].candidate),
+                        Ok(None) => tracing::debug!("hint mode cancelled"),
+                        Err(err) => tracing::warn!(error = %err, "hint mode failed"),
+                    }
+                    return;
+                }
+            }
+
+            // Primary-screen sessions (no positional information for what is
+            // visible): modal list over the captured history.
+            let mut lines = scroll_lines;
+            lines.extend(alt_rows.iter().cloned());
             let candidates = crate::hint::extract_candidates(&lines, &cwd, 40);
             tracing::debug!(
                 window = lines.len(),
                 alt_screen,
                 candidates = candidates.len(),
-                "hint mode triggered"
+                "hint mode (modal fallback)"
             );
             if candidates.is_empty() {
                 let dump = crate::debug::dump_state(tap, "hint mode found no candidates")
@@ -359,26 +388,25 @@ fn handle_action(
                 );
                 return;
             }
-            // Holding the gate pauses the output pump so the child cannot
-            // repaint over the overlay; PTY backpressure holds its output.
             let _gate = gate.lock().expect("stdout gate poisoned");
             let mut stdout = io::stdout();
             match crate::hint::pick(stdin, &mut stdout, &candidates, &mouse_modes) {
-                Ok(Some(index)) => {
-                    let chosen = &candidates[index];
-                    match crate::export::open_location(&chosen.path, chosen.line, chosen.column) {
-                        Ok(()) => tracing::info!(
-                            path = %chosen.path.display(),
-                            line = ?chosen.line,
-                            "opened location from hint mode"
-                        ),
-                        Err(err) => tracing::warn!(error = %err, "failed to open location"),
-                    }
-                }
+                Ok(Some(index)) => open_candidate(&candidates[index]),
                 Ok(None) => tracing::debug!("hint mode cancelled"),
                 Err(err) => tracing::warn!(error = %err, "hint mode failed"),
             }
         }
+    }
+}
+
+fn open_candidate(chosen: &crate::hint::Candidate) {
+    match crate::export::open_location(&chosen.path, chosen.line, chosen.column) {
+        Ok(()) => tracing::info!(
+            path = %chosen.path.display(),
+            line = ?chosen.line,
+            "opened location from hint mode"
+        ),
+        Err(err) => tracing::warn!(error = %err, "failed to open location"),
     }
 }
 

@@ -27,7 +27,8 @@ zediator run -- <agent-cli>
 │ title      OSC 0/2 filter (buffer until terminator) +  │
 │            managed-title thread (adapter polling)      │
 │ input      prefix-key (ctrl-]) filter on stdin         │
-│ hint       path extraction + overlay picker            │
+│ hint       path extraction + in-place labels           │
+│            (modal list fallback on primary screen)     │
 │ export     transcript→Markdown / capture→Markdown      │
 │ ipc        Unix socket server; `send` client           │
 │ adapter    trait + ClaudeCode / Antigravity / fallback │

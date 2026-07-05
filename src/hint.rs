@@ -134,23 +134,23 @@ pub fn extract_candidates(lines: &[String], cwd: &Path, limit: usize) -> Vec<Can
     let mut index: Option<FileIndex> = None;
 
     for line in lines.iter().rev() {
-        for (display, path_text, lineno, col) in matches_in_line(line) {
-            let resolved = resolve(&path_text, cwd).or_else(|| {
+        for m in matches_in_line(line) {
+            let resolved = resolve(&m.path_text, cwd).or_else(|| {
                 index
                     .get_or_insert_with(|| FileIndex::scan(cwd))
-                    .resolve(&path_text)
+                    .resolve(&m.path_text)
             });
             let Some(resolved) = resolved else {
                 continue;
             };
-            if !seen.insert((resolved.clone(), lineno)) {
+            if !seen.insert((resolved.clone(), m.lineno)) {
                 continue;
             }
             out.push(Candidate {
-                display,
+                display: m.display,
                 path: resolved,
-                line: lineno,
-                column: col,
+                line: m.lineno,
+                column: m.col,
             });
             if out.len() >= limit {
                 return out;
@@ -160,18 +160,91 @@ pub fn extract_candidates(lines: &[String], cwd: &Path, limit: usize) -> Vec<Can
     out
 }
 
-fn matches_in_line(line: &str) -> Vec<(String, String, Option<u32>, Option<u32>)> {
+/// A candidate anchored to its on-screen position (alternate-screen rows).
+pub struct ScreenHint {
+    pub candidate: Candidate,
+    /// 0-based row within the visible frame.
+    pub row: usize,
+    /// Cell index within the row (in chars), used to restore covered text.
+    pub char_col: usize,
+    /// Terminal display column (unicode-width aware), used for addressing.
+    pub display_col: usize,
+}
+
+/// Extracts positioned hints from the visible frame, bottom-up (labels are
+/// assigned to the most recent content first).
+pub fn extract_screen_hints(rows: &[String], cwd: &Path, limit: usize) -> Vec<ScreenHint> {
+    use unicode_width::UnicodeWidthStr;
+
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let mut index: Option<FileIndex> = None;
+
+    for (row, line) in rows.iter().enumerate().rev() {
+        for m in matches_in_line(line) {
+            let resolved = resolve(&m.path_text, cwd).or_else(|| {
+                index
+                    .get_or_insert_with(|| FileIndex::scan(cwd))
+                    .resolve(&m.path_text)
+            });
+            let Some(resolved) = resolved else {
+                continue;
+            };
+            if !seen.insert((resolved.clone(), m.lineno)) {
+                continue;
+            }
+            let prefix = &line[..m.start];
+            out.push(ScreenHint {
+                candidate: Candidate {
+                    display: m.display,
+                    path: resolved,
+                    line: m.lineno,
+                    column: m.col,
+                },
+                row,
+                char_col: prefix.chars().count(),
+                display_col: UnicodeWidthStr::width(prefix),
+            });
+            if out.len() >= limit {
+                return out;
+            }
+        }
+    }
+    out
+}
+
+/// One regex match within a line: byte offset of the match start, display
+/// text, path text, and the optional line/column suffix.
+struct LineMatch {
+    start: usize,
+    display: String,
+    path_text: String,
+    lineno: Option<u32>,
+    col: Option<u32>,
+}
+
+fn matches_in_line(line: &str) -> Vec<LineMatch> {
     let mut found = Vec::new();
     for caps in traceback_regex().captures_iter(line) {
         let path = caps["p"].to_owned();
         let lineno = caps["l"].parse().ok();
-        found.push((format!("{path}:{}", &caps["l"]), path, lineno, None));
+        found.push(LineMatch {
+            start: caps.get(0).map_or(0, |m| m.start()),
+            display: format!("{path}:{}", &caps["l"]),
+            path_text: path,
+            lineno,
+            col: None,
+        });
     }
     for caps in path_regex().captures_iter(line) {
         let path = caps["p"].trim_end_matches(['.', ',', ')', ';']).to_owned();
-        let lineno = caps.name("l").and_then(|m| m.as_str().parse().ok());
-        let col = caps.name("c").and_then(|m| m.as_str().parse().ok());
-        found.push((caps[0].to_owned(), path, lineno, col));
+        found.push(LineMatch {
+            start: caps.get(0).map_or(0, |m| m.start()),
+            display: caps[0].to_owned(),
+            path_text: path,
+            lineno: caps.name("l").and_then(|m| m.as_str().parse().ok()),
+            col: caps.name("c").and_then(|m| m.as_str().parse().ok()),
+        });
     }
     found
 }
@@ -327,6 +400,68 @@ pub fn pick(
 
     // Restore the child's screen and its mouse-tracking modes.
     stdout.write_all(b"\x1b[?25h\x1b[?1049l")?;
+    set_mouse_modes(stdout, mouse_modes, true)?;
+    stdout.flush()?;
+    selection
+}
+
+/// Runs the in-place overlay: paints hint labels directly over the path
+/// positions on the current screen (no modal), reads a label, then restores
+/// the covered characters from the grid. Returns the selected hint index.
+///
+/// The caller must hold the stdout gate for the whole call. `rows` must be
+/// the same visible frame the hints were extracted from. Covered characters
+/// are repainted without their original colors; the child's next frame
+/// redraw restores them fully.
+pub fn pick_overlay(
+    stdin: &mut impl HintInput,
+    stdout: &mut impl Write,
+    hints: &[ScreenHint],
+    rows: &[String],
+    mouse_modes: &[u16],
+) -> io::Result<Option<usize>> {
+    let visible = hints.len().min(LABEL_KEYS.len()).max(1);
+    let labels: Vec<String> = (0..visible).map(label).collect();
+
+    set_mouse_modes(stdout, mouse_modes, false)?;
+    stdout.write_all(b"\x1b7\x1b[?25l")?; // save cursor, hide it
+    for (i, hint) in hints.iter().take(visible).enumerate() {
+        stdout.write_all(
+            format!(
+                "\x1b[{};{}H\x1b[1;7;33m{}\x1b[0m",
+                hint.row + 1,
+                hint.display_col + 1,
+                labels[i]
+            )
+            .as_bytes(),
+        )?;
+    }
+    stdout.flush()?;
+
+    let selection = read_selection(stdin, &labels);
+
+    // Repaint the characters the labels covered (label chars are ASCII, so
+    // covered display columns == covered cells).
+    for (i, hint) in hints.iter().take(visible).enumerate() {
+        let covered: String = rows
+            .get(hint.row)
+            .map(|line| {
+                line.chars()
+                    .skip(hint.char_col)
+                    .take(labels[i].len())
+                    .collect()
+            })
+            .unwrap_or_default();
+        stdout.write_all(
+            format!(
+                "\x1b[{};{}H\x1b[0m{covered}",
+                hint.row + 1,
+                hint.display_col + 1
+            )
+            .as_bytes(),
+        )?;
+    }
+    stdout.write_all(b"\x1b[?25h\x1b8")?; // show cursor, restore position
     set_mouse_modes(stdout, mouse_modes, true)?;
     stdout.flush()?;
     selection
@@ -565,6 +700,63 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].path, cwd.join("deep/adapter/claude.rs"));
         assert_eq!(found[0].line, Some(12));
+    }
+
+    #[test]
+    fn screen_hints_carry_positions_including_cjk_width() {
+        let (_dir, cwd) = fixture();
+        let rows = vec![
+            "説明 src/main.rs を参照".to_owned(), // CJK prefix: 2+2+1 = width 5
+            "plain script.py:3 here".to_owned(),
+        ];
+        let hints = extract_screen_hints(&rows, &cwd, 10);
+        assert_eq!(hints.len(), 2);
+        // Bottom-up: script.py first.
+        assert_eq!(hints[0].row, 1);
+        assert_eq!(hints[0].display_col, 6);
+        assert_eq!(hints[0].char_col, 6);
+        assert_eq!(hints[0].candidate.line, Some(3));
+        // CJK line: char index 3 ("説明 "), display width 5.
+        assert_eq!(hints[1].row, 0);
+        assert_eq!(hints[1].char_col, 3);
+        assert_eq!(hints[1].display_col, 5);
+    }
+
+    #[test]
+    fn pick_overlay_draws_labels_at_positions_and_restores_text() {
+        let (_dir, cwd) = fixture();
+        let rows = vec!["see src/main.rs here".to_owned()];
+        let hints = extract_screen_hints(&rows, &cwd, 10);
+        assert_eq!(hints.len(), 1);
+
+        let mut input: &[u8] = b"a";
+        let mut output = Vec::new();
+        let picked = pick_overlay(&mut input, &mut output, &hints, &rows, &[]).unwrap();
+        assert_eq!(picked, Some(0));
+
+        let drawn = String::from_utf8_lossy(&output);
+        // Label drawn at row 1, display column 5 (0-based 4), no alt screen.
+        assert!(drawn.contains("\x1b[1;5H"));
+        assert!(!drawn.contains("\x1b[?1049h"));
+        // Covered character ('s' of src) repainted afterwards.
+        assert!(drawn.contains("\x1b[1;5H\x1b[0ms"));
+        // Cursor saved and restored.
+        assert!(drawn.contains('\x1b') && drawn.contains("\x1b7") && drawn.contains("\x1b8"));
+    }
+
+    #[test]
+    fn pick_overlay_cancel_still_restores() {
+        let (_dir, cwd) = fixture();
+        let rows = vec!["see src/main.rs".to_owned()];
+        let hints = extract_screen_hints(&rows, &cwd, 10);
+        let mut input: &[u8] = b"\x1b";
+        let mut output = Vec::new();
+        assert_eq!(
+            pick_overlay(&mut input, &mut output, &hints, &rows, &[]).unwrap(),
+            None
+        );
+        let drawn = String::from_utf8_lossy(&output);
+        assert!(drawn.contains("\x1b8"));
     }
 
     #[test]

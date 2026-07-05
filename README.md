@@ -48,7 +48,7 @@ wrapped CLI keeps its entire keymap. Press `ctrl-]` twice to send a literal
 
 | Keys | Action |
 |------|--------|
-| `ctrl-] f` | Hint mode: pick a file path from the log, open it in the editor |
+| `ctrl-] f` | Hint mode: labels appear on the file paths visible on screen; press one to open that path in the editor. Falls back to a list view for primary-screen sessions |
 | `ctrl-] e` | Export the session log as Markdown and open it |
 | `ctrl-] d` | Dump zediator's internal state to a file (diagnostics) |
 
