@@ -105,12 +105,14 @@ fn path_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // Multi-segment paths (contain `/`) or bare file names with an
-        // extension, optionally followed by `:line[:col]`.
+        // extension, optionally followed by `:line[:col]`. The character
+        // class is deliberately ASCII: `\w` matches CJK, which would glue
+        // surrounding prose onto the path in Japanese output.
         Regex::new(
             r"(?x)
             (?P<p>
-                (?:~|\.{1,2})?/?[\w@.+-]+(?:/[\w@.+-]+)+  # segment/segment...
-              | [\w@+-][\w@.+-]*\.[A-Za-z0-9]{1,8}       # name.ext
+                (?:~|\.{1,2})?/?[A-Za-z0-9_@.+-]+(?:/[A-Za-z0-9_@.+-]+)+  # a/b...
+              | [A-Za-z0-9_@+-][A-Za-z0-9_@.+-]*\.[A-Za-z0-9]{1,8}       # name.ext
             )
             (?: : (?P<l>\d+) (?: : (?P<c>\d+) )? )?
             ",
@@ -165,9 +167,7 @@ pub struct ScreenHint {
     pub candidate: Candidate,
     /// 0-based row within the visible frame.
     pub row: usize,
-    /// Cell index within the row (in chars), used to restore covered text.
-    pub char_col: usize,
-    /// Terminal display column (unicode-width aware), used for addressing.
+    /// Terminal display column of the path start (unicode-width aware).
     pub display_col: usize,
 }
 
@@ -202,7 +202,6 @@ pub fn extract_screen_hints(rows: &[String], cwd: &Path, limit: usize) -> Vec<Sc
                     column: m.col,
                 },
                 row,
-                char_col: prefix.chars().count(),
                 display_col: UnicodeWidthStr::width(prefix),
             });
             if out.len() >= limit {
@@ -405,14 +404,49 @@ pub fn pick(
     selection
 }
 
-/// Runs the in-place overlay: paints hint labels directly over the path
-/// positions on the current screen (no modal), reads a label, then restores
-/// the covered characters from the grid. Returns the selected hint index.
+/// Display-column slice of `line` covering `[from, from + len)`, extended
+/// left to a character boundary (a label may overlap half of a wide char)
+/// and padded with spaces where the row has no text. Returns the (possibly
+/// earlier) start column and the text to repaint.
+fn slice_display_cols(line: &str, from: usize, len: usize) -> (usize, String) {
+    use unicode_width::UnicodeWidthChar;
+    use unicode_width::UnicodeWidthStr;
+
+    let to = from + len;
+    let mut col = 0usize;
+    let mut start = from;
+    let mut text = String::new();
+    for ch in line.chars() {
+        let end = col + UnicodeWidthChar::width(ch).unwrap_or(1).clamp(1, 2);
+        if end > from && col < to {
+            if text.is_empty() {
+                start = col;
+            }
+            text.push(ch);
+        }
+        col = end;
+        if col >= to {
+            break;
+        }
+    }
+    let covered = UnicodeWidthStr::width(text.as_str());
+    let span = to - start;
+    if covered < span {
+        text.extend(std::iter::repeat_n(' ', span - covered));
+    }
+    (start, text)
+}
+
+/// Runs the in-place overlay: paints hint labels directly over the current
+/// screen (no modal), reads a label, then restores the covered characters
+/// from the grid. Returns the selected hint index.
 ///
-/// The caller must hold the stdout gate for the whole call. `rows` must be
-/// the same visible frame the hints were extracted from. Covered characters
-/// are repainted without their original colors; the child's next frame
-/// redraw restores them fully.
+/// Labels sit immediately to the LEFT of the path so short filenames stay
+/// readable; a path starting at column 0 gets its first characters covered
+/// instead. The caller must hold the stdout gate for the whole call, and
+/// `rows` must be the visible frame the hints were extracted from. Covered
+/// characters are repainted without their original colors; the child's next
+/// frame redraw restores them fully.
 pub fn pick_overlay(
     stdin: &mut impl HintInput,
     stdout: &mut impl Write,
@@ -422,6 +456,7 @@ pub fn pick_overlay(
 ) -> io::Result<Option<usize>> {
     let visible = hints.len().min(LABEL_KEYS.len()).max(1);
     let labels: Vec<String> = (0..visible).map(label).collect();
+    let label_col = |hint: &ScreenHint, label: &str| hint.display_col.saturating_sub(label.len());
 
     set_mouse_modes(stdout, mouse_modes, false)?;
     stdout.write_all(b"\x1b7\x1b[?25l")?; // save cursor, hide it
@@ -430,7 +465,7 @@ pub fn pick_overlay(
             format!(
                 "\x1b[{};{}H\x1b[1;7;33m{}\x1b[0m",
                 hint.row + 1,
-                hint.display_col + 1,
+                label_col(hint, &labels[i]) + 1,
                 labels[i]
             )
             .as_bytes(),
@@ -440,25 +475,13 @@ pub fn pick_overlay(
 
     let selection = read_selection(stdin, &labels);
 
-    // Repaint the characters the labels covered (label chars are ASCII, so
-    // covered display columns == covered cells).
+    // Repaint what the labels covered.
     for (i, hint) in hints.iter().take(visible).enumerate() {
-        let covered: String = rows
-            .get(hint.row)
-            .map(|line| {
-                line.chars()
-                    .skip(hint.char_col)
-                    .take(labels[i].len())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let from = label_col(hint, &labels[i]);
+        let line = rows.get(hint.row).map(String::as_str).unwrap_or("");
+        let (start, covered) = slice_display_cols(line, from, labels[i].len());
         stdout.write_all(
-            format!(
-                "\x1b[{};{}H\x1b[0m{covered}",
-                hint.row + 1,
-                hint.display_col + 1
-            )
-            .as_bytes(),
+            format!("\x1b[{};{}H\x1b[0m{covered}", hint.row + 1, start + 1).as_bytes(),
         )?;
     }
     stdout.write_all(b"\x1b[?25h\x1b8")?; // show cursor, restore position
@@ -714,11 +737,9 @@ mod tests {
         // Bottom-up: script.py first.
         assert_eq!(hints[0].row, 1);
         assert_eq!(hints[0].display_col, 6);
-        assert_eq!(hints[0].char_col, 6);
         assert_eq!(hints[0].candidate.line, Some(3));
-        // CJK line: char index 3 ("説明 "), display width 5.
+        // CJK line: "説明 " is 3 chars but 5 display columns.
         assert_eq!(hints[1].row, 0);
-        assert_eq!(hints[1].char_col, 3);
         assert_eq!(hints[1].display_col, 5);
     }
 
@@ -735,13 +756,49 @@ mod tests {
         assert_eq!(picked, Some(0));
 
         let drawn = String::from_utf8_lossy(&output);
-        // Label drawn at row 1, display column 5 (0-based 4), no alt screen.
-        assert!(drawn.contains("\x1b[1;5H"));
+        // Path starts at display column 4 (0-based); the one-char label sits
+        // one column to its LEFT (column 3, so CUP column 4), keeping the
+        // filename readable. No alt screen involved.
+        assert!(drawn.contains("\x1b[1;4H"));
         assert!(!drawn.contains("\x1b[?1049h"));
-        // Covered character ('s' of src) repainted afterwards.
-        assert!(drawn.contains("\x1b[1;5H\x1b[0ms"));
+        // The covered space before the path is repainted afterwards.
+        assert!(drawn.contains("\x1b[1;4H\x1b[0m "));
         // Cursor saved and restored.
         assert!(drawn.contains('\x1b') && drawn.contains("\x1b7") && drawn.contains("\x1b8"));
+    }
+
+    #[test]
+    fn pick_overlay_covers_path_start_only_at_column_zero() {
+        let (_dir, cwd) = fixture();
+        let rows = vec!["src/main.rs at line start".to_owned()];
+        let hints = extract_screen_hints(&rows, &cwd, 10);
+        let mut input: &[u8] = b"a";
+        let mut output = Vec::new();
+        pick_overlay(&mut input, &mut output, &hints, &rows, &[]).unwrap();
+        let drawn = String::from_utf8_lossy(&output);
+        // No room on the left: label sits on the path's first character,
+        // which is repainted ('s') on exit.
+        assert!(drawn.contains("\x1b[1;1H\x1b[1;7;33ma"));
+        assert!(drawn.contains("\x1b[1;1H\x1b[0ms"));
+    }
+
+    #[test]
+    fn pick_overlay_restores_full_wide_char_on_half_overlap() {
+        let (_dir, cwd) = fixture();
+        // "あ" is 2 columns wide; the path starts at display column 2, so a
+        // one-char label at column 1 overlaps the right half of "あ".
+        let rows = vec!["あsrc/main.rs".to_owned()];
+        let hints = extract_screen_hints(&rows, &cwd, 10);
+        assert_eq!(hints[0].display_col, 2);
+        let mut input: &[u8] = b"\x1b";
+        let mut output = Vec::new();
+        pick_overlay(&mut input, &mut output, &hints, &rows, &[]).unwrap();
+        let drawn = String::from_utf8_lossy(&output);
+        // Label drawn at column 2 (CUP 1;2)...
+        assert!(drawn.contains("\x1b[1;2H\x1b[1;7;33ma"));
+        // ...but restoration rewinds to the wide char's boundary (CUP 1;1)
+        // and repaints the whole "あ".
+        assert!(drawn.contains("\x1b[1;1H\x1b[0mあ"));
     }
 
     #[test]

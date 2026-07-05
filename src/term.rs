@@ -219,17 +219,29 @@ impl AltGrid {
         }
     }
 
+    /// Writes one character at the cursor. Cells correspond to DISPLAY
+    /// columns: wide characters occupy two cells (the second holds a NUL
+    /// continuation marker), so cursor-addressing parameters (CUP/CHA, which
+    /// are display columns) stay aligned with the grid even on CJK lines.
     fn put(&mut self, c: char) {
+        use unicode_width::UnicodeWidthChar;
+        let width = UnicodeWidthChar::width(c).unwrap_or(1).clamp(1, 2);
         let line = &mut self.rows[self.row];
         while line.len() < self.col {
             line.push(' ');
         }
-        if self.col < line.len() {
-            line[self.col] = c;
-        } else {
-            line.push(c);
+        let set = |line: &mut Vec<char>, index: usize, ch: char| {
+            if index < line.len() {
+                line[index] = ch;
+            } else {
+                line.push(ch);
+            }
+        };
+        set(line, self.col, c);
+        if width == 2 {
+            set(line, self.col + 1, '\0');
         }
-        self.col += 1;
+        self.col += width;
     }
 
     fn move_to(&mut self, row: usize, col: usize) {
@@ -344,9 +356,15 @@ impl AltGrid {
         }
     }
 
-    /// Current screen text, trailing blank rows trimmed.
+    /// Current screen text, trailing blank rows trimmed. Wide-character
+    /// continuation cells are dropped, so the text is display-faithful:
+    /// the unicode-width of any prefix equals its starting column.
     fn lines(&self) -> Vec<String> {
-        let mut lines: Vec<String> = self.rows.iter().map(|r| r.iter().collect()).collect();
+        let mut lines: Vec<String> = self
+            .rows
+            .iter()
+            .map(|r| r.iter().filter(|&&c| c != '\0').collect())
+            .collect();
         while lines.last().is_some_and(|l| l.trim().is_empty()) {
             lines.pop();
         }
@@ -789,6 +807,14 @@ mod tests {
             b"\x1b[?1049h\x1b[1;1HA\x1b[2;1HB\x1b[3;1HC\x1b[4;1HD\x1b[2;1H\x1b[1M",
         );
         assert_eq!(snapshot(&shared), ["A", "C", "D"]);
+    }
+
+    #[test]
+    fn alt_grid_cells_track_display_columns_for_cjk() {
+        // "あい" occupies display columns 1-4; CHA to column 5 must place
+        // the following text right after it, not two columns further out.
+        let shared = feed_with_rows(4, "\x1b[?1049hあい\x1b[5GX.rs".as_bytes());
+        assert_eq!(snapshot(&shared), ["あいX.rs"]);
     }
 
     #[test]
