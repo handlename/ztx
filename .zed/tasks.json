@@ -19,7 +19,7 @@
     "label": "zediator: send selection",
     "command": "$ZED_WORKTREE_ROOT/target/debug/zediator",
     "args": ["send", "--from-zed-env"],
-
+    "hide": "always",
     "reveal": "never",
   },
 ]

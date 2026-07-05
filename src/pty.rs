@@ -35,6 +35,19 @@ pub struct RunOptions {
 /// every key chord, including sequences like Shift+Enter encoded via the kitty
 /// keyboard protocol, reaches the child as-is.
 pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
+    // Claim this project's IPC socket before spawning the child, so a second
+    // session in the same project is refused instead of launching the agent
+    // CLI and then failing. A non-collision bind error (e.g. an unwritable
+    // runtime dir) is non-fatal: the wrapper runs without selection sharing.
+    let bound = match crate::ipc::IpcServer::bind_project() {
+        Ok(bound) => Some(bound),
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => return Err(err),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to bind IPC socket; selection sharing disabled");
+            None
+        }
+    };
+
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(current_size())
@@ -118,15 +131,9 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         }
     });
 
-    // IPC socket for `zediator send`. Failure is non-fatal: everything else
-    // works without the selection-sharing channel.
-    let _ipc = match crate::ipc::IpcServer::start(child_writer.clone()) {
-        Ok(server) => Some(server),
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to start IPC socket");
-            None
-        }
-    };
+    // Start serving `zediator send` on the socket claimed above (if any).
+    // Kept alive for the session; dropped on exit to clean up the socket.
+    let _ipc = bound.map(|b| b.serve(child_writer.clone()));
 
     // stdin -> child, with zediator's prefix-key bindings peeled off when the
     // input is interactive. Left detached: reads from stdin cannot be

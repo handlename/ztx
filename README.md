@@ -60,7 +60,8 @@ zediator run [--adapter auto|claude|antigravity|none]
 zediator export [--stdout]        # export the latest session for this cwd
 zediator send --from-zed-env      # inject the Zed selection (reads ZED_* env)
 zediator send --file F --line N --text "..."   # inject explicitly
-zediator sessions                 # list running wrapper sessions
+zediator send --socket PATH ...   # target a specific session's socket
+zediator sessions                 # list running sessions (pid + cwd)
 zediator setup zed [--yes]        # install the Zed task + keybinding
 ```
 
@@ -76,11 +77,12 @@ After that, selecting text in the editor and pressing `cmd-alt-z` sends
 same project. Zed's built-in `agent::AddSelectionToThread` (`cmd->`) also
 works with Terminal Threads and needs no setup.
 
-Multiple sessions can run at once. A bare `zediator send` routes to the live
-session whose working directory matches the editor's project root
-(`ZED_WORKTREE_ROOT`); if several run in the same project, the most recent
-wins. Target a specific one with `zediator sessions` (shows pid + cwd) and
-`zediator send --pid <PID> …`.
+One session per project. A bare `zediator send` routes to the session whose
+working directory matches the editor's project root (`ZED_WORKTREE_ROOT`, else
+the current directory), so sessions in different projects each receive their
+own selections. Starting a second `zediator run` in a project that already has
+a live session is refused. `zediator sessions` lists running sessions (pid +
+cwd); `zediator send --socket <PATH>` targets one explicitly.
 
 ## Configuration
 

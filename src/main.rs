@@ -47,18 +47,9 @@ fn main() -> ExitCode {
             file,
             line,
             text,
-            pid,
             socket,
             message,
-        } => report(run_send(
-            from_zed_env,
-            file,
-            line,
-            text,
-            pid,
-            socket,
-            message,
-        )),
+        } => report(run_send(from_zed_env, file, line, text, socket, message)),
         cli::Command::Sessions => report(run_sessions()),
         cli::Command::Setup { target } => match target {
             cli::SetupTarget::Zed { yes } => report(setup::zed(yes)),
@@ -76,13 +67,11 @@ fn report(result: std::io::Result<()>) -> ExitCode {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_send(
     from_zed_env: bool,
     mut file: Option<String>,
     mut line: Option<u32>,
     mut text: Option<String>,
-    pid: Option<u32>,
     socket: Option<std::path::PathBuf>,
     message: Vec<String>,
 ) -> std::io::Result<()> {
@@ -100,7 +89,7 @@ fn run_send(
             "nothing to send (pass --file/--text, a message, or --from-zed-env)",
         ));
     }
-    let target = ipc::resolve_socket(pid, socket)?;
+    let target = ipc::resolve_socket(socket)?;
     ipc::send(&target, &payload)
 }
 
@@ -115,12 +104,16 @@ fn run_sessions() -> std::io::Result<()> {
     }
     for session in sessions {
         let state = if session.alive { "alive" } else { "stale" };
+        let pid = session
+            .pid
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "?".into());
         let cwd = session
             .cwd
             .as_deref()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        println!("{}\t{state}\t{cwd}", session.pid);
+        println!("{pid}\t{state}\t{cwd}");
     }
     Ok(())
 }

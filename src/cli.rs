@@ -68,11 +68,8 @@ pub enum Command {
         #[arg(long)]
         text: Option<String>,
 
-        /// Target session by wrapper pid (see `zediator sessions`)
-        #[arg(long)]
-        pid: Option<u32>,
-
-        /// Target session by explicit socket path
+        /// Target a session by explicit socket path (default: this project's
+        /// session, keyed by ZED_WORKTREE_ROOT or the current directory)
         #[arg(long)]
         socket: Option<std::path::PathBuf>,
 

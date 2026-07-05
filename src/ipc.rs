@@ -1,18 +1,13 @@
 //! IPC channel (feature 4: pull editor selections into the session).
 //!
-//! Each wrapper listens on a Unix socket; `zediator send` (typically invoked
-//! from a Zed task with `$ZED_RELATIVE_FILE` / `$ZED_ROW` /
-//! `$ZED_SELECTED_TEXT`) connects and writes a message, which the wrapper
-//! injects into the child's stdin as a bracketed paste.
-//!
-//! Discovery: sockets live in one per-user directory as `<pid>.sock`, each
-//! with a `<pid>.cwd` sidecar recording the wrapper's working directory. A
-//! bare `send` routes to the live session whose cwd matches the editor's
-//! project (`ZED_WORKTREE_ROOT`), so concurrent sessions in different
-//! projects each receive their own selections; it then falls back to the
-//! `latest.sock` symlink and finally the newest live socket. `--pid`/
-//! `--socket` select an explicit session. Stale sockets are swept
-//! opportunistically.
+//! Each wrapper listens on a Unix socket whose name is derived from the
+//! project directory it runs in, so `zediator send` resolves the target in
+//! O(1): both sides hash the project root (`ZED_WORKTREE_ROOT`, else the
+//! current directory) to the same `<hash>.sock` path — no scanning, no
+//! registry. This assumes one session per project: `zediator run` refuses to
+//! start when a live session already owns the project's socket. `--socket`
+//! overrides the target explicitly. A sibling `<hash>.info` records pid and
+//! cwd for `zediator sessions` display only (never used for resolution).
 
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -24,8 +19,6 @@ use std::thread;
 /// Shared handle to the child's PTY writer, used by both the stdin pump and
 /// the IPC accept loop.
 pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
-
-const LATEST_LINK: &str = "latest.sock";
 
 /// Upper bound for one IPC message; protects the wrapper (and the session it
 /// hosts) from a runaway or malicious client exhausting memory.
@@ -47,37 +40,96 @@ pub fn socket_dir() -> PathBuf {
     std::env::temp_dir().join("zediator-run")
 }
 
+/// Canonicalizes a path, falling back to the input so symlink differences
+/// (e.g. macOS `/tmp` vs `/private/tmp`) do not defeat matching.
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// FNV-1a 64-bit hash. Deterministic across runs and builds (unlike
+/// `DefaultHasher`), so `run` and `send` always agree on the socket name.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in bytes {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// The project directory a bare `send`/`run` keys off: the editor's worktree
+/// root when Zed provides it, otherwise the current directory.
+fn project_cwd() -> PathBuf {
+    let raw = std::env::var("ZED_WORKTREE_ROOT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    canonical(&raw)
+}
+
+/// Deterministic socket path for a (canonical) project directory.
+fn socket_path_for(cwd: &Path) -> PathBuf {
+    let key = fnv1a(cwd.to_string_lossy().as_bytes());
+    socket_dir().join(format!("{key:016x}.sock"))
+}
+
+/// A socket reserved for this project, before the accept loop is running.
+/// Kept separate from [`IpcServer`] so `run` can claim the project (and fail
+/// fast on a collision) before spawning the child.
+pub struct BoundSocket {
+    listener: UnixListener,
+    socket_path: PathBuf,
+}
+
 /// Server side, owned by the wrapper process. Cleans its socket up on drop.
 pub struct IpcServer {
     socket_path: PathBuf,
 }
 
 impl IpcServer {
-    /// Binds this wrapper's socket, repoints `latest.sock`, sweeps stale
-    /// sockets, and spawns the accept loop feeding `writer`.
-    pub fn start(writer: SharedWriter) -> io::Result<Self> {
+    /// Reserves this project's socket. Returns [`io::ErrorKind::AlreadyExists`]
+    /// when a live session already owns it (the caller should refuse to
+    /// start); a stale socket is cleaned up and rebound.
+    pub fn bind_project() -> io::Result<BoundSocket> {
         let dir = socket_dir();
         std::fs::create_dir_all(&dir)?;
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-        sweep_stale(&dir);
 
-        let socket_path = dir.join(format!("{}.sock", std::process::id()));
+        let cwd = project_cwd();
+        let socket_path = socket_path_for(&cwd);
+        if UnixStream::connect(&socket_path).is_ok() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!(
+                    "a zediator session is already running in this project ({})",
+                    cwd.display()
+                ),
+            ));
+        }
+        // Stale socket (owner gone): remove and take it over.
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path)?;
 
-        // Record our working directory in a sidecar so `send` can route to the
-        // session belonging to the editor's current project (see resolve_socket).
-        if let Ok(cwd) = std::env::current_dir() {
-            let _ = std::fs::write(
-                socket_path.with_extension("cwd"),
-                cwd.to_string_lossy().as_bytes(),
-            );
-        }
+        // Record pid + cwd for `sessions` display only.
+        let _ = std::fs::write(
+            socket_path.with_extension("info"),
+            format!("{}\n{}", std::process::id(), cwd.display()),
+        );
 
-        let latest = dir.join(LATEST_LINK);
-        let _ = std::fs::remove_file(&latest);
-        let _ = std::os::unix::fs::symlink(&socket_path, &latest);
+        Ok(BoundSocket {
+            listener,
+            socket_path,
+        })
+    }
+}
 
+impl BoundSocket {
+    /// Starts the accept loop that injects received messages into `writer`
+    /// as bracketed pastes, and hands back an [`IpcServer`] for cleanup.
+    pub fn serve(self, writer: SharedWriter) -> IpcServer {
+        let listener = self.listener;
         thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { continue };
@@ -103,127 +155,37 @@ impl IpcServer {
                 }
             }
         });
-
-        Ok(Self { socket_path })
+        IpcServer {
+            socket_path: self.socket_path,
+        }
     }
 }
 
 impl Drop for IpcServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket_path);
-        let _ = std::fs::remove_file(self.socket_path.with_extension("cwd"));
-        let latest = self.socket_path.with_file_name(LATEST_LINK);
-        if std::fs::read_link(&latest).is_ok_and(|target| target == self.socket_path) {
-            let _ = std::fs::remove_file(&latest);
-        }
+        let _ = std::fs::remove_file(self.socket_path.with_extension("info"));
     }
 }
 
-/// Removes sockets whose wrapper no longer accepts connections.
-fn sweep_stale(dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "sock")
-            || path.file_name().is_some_and(|n| n == LATEST_LINK)
-        {
-            continue;
-        }
-        if UnixStream::connect(&path).is_err() {
-            let _ = std::fs::remove_file(&path);
-            let _ = std::fs::remove_file(path.with_extension("cwd"));
-        }
-    }
-}
-
-/// Resolves the target socket for `zediator send`.
-///
-/// Precedence: explicit `--socket`, then `--pid`, then the session whose
-/// working directory matches the editor's project (`ZED_WORKTREE_ROOT`, else
-/// our own cwd), then `latest.sock`, then the newest live socket anywhere.
-/// The cwd step routes selections to the right session when several run at
-/// once in different projects.
-pub fn resolve_socket(pid: Option<u32>, socket: Option<PathBuf>) -> io::Result<PathBuf> {
+/// Resolves the target socket for `zediator send`: an explicit `--socket`,
+/// otherwise this project's deterministic socket. Errors when no live session
+/// owns it.
+pub fn resolve_socket(socket: Option<PathBuf>) -> io::Result<PathBuf> {
     if let Some(path) = socket {
         return Ok(path);
     }
-    let dir = socket_dir();
-    if let Some(pid) = pid {
-        return Ok(dir.join(format!("{pid}.sock")));
+    let cwd = project_cwd();
+    let path = socket_path_for(&cwd);
+    if UnixStream::connect(&path).is_ok() {
+        Ok(path)
+    } else {
+        Err(io::Error::other(format!(
+            "no zediator session running for this project ({}); \
+             start one with `zediator run -- <cli>`",
+            cwd.display()
+        )))
     }
-
-    if let Some(target) = target_cwd()
-        && let Some(sock) = newest_live_socket_matching(&dir, Some(&target))
-    {
-        return Ok(sock);
-    }
-
-    let latest = dir.join(LATEST_LINK);
-    if let Ok(target) = std::fs::read_link(&latest)
-        && UnixStream::connect(&target).is_ok()
-    {
-        return Ok(target);
-    }
-    // Fall back to the newest live socket regardless of cwd.
-    newest_live_socket_matching(&dir, None).ok_or_else(|| {
-        io::Error::other("no running zediator session found (is one running in Zed?)")
-    })
-}
-
-/// The directory `send` should route to: the editor's project root when Zed
-/// provides it, otherwise our own working directory. Canonicalized so symlink
-/// differences (e.g. macOS `/tmp` vs `/private/tmp`) do not defeat matching.
-fn target_cwd() -> Option<PathBuf> {
-    let raw = std::env::var("ZED_WORKTREE_ROOT")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())?;
-    Some(canonical(&raw))
-}
-
-fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
-
-/// Reads the working directory recorded for the session at `socket_path`.
-fn session_cwd(socket_path: &Path) -> Option<PathBuf> {
-    let raw = std::fs::read_to_string(socket_path.with_extension("cwd")).ok()?;
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    Some(canonical(Path::new(raw)))
-}
-
-/// Newest live socket, optionally restricted to sessions whose recorded cwd
-/// equals `want_cwd`.
-fn newest_live_socket_matching(dir: &Path, want_cwd: Option<&Path>) -> Option<PathBuf> {
-    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-    for entry in std::fs::read_dir(dir).ok()?.flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "sock")
-            || path.file_name().is_some_and(|n| n == LATEST_LINK)
-            || UnixStream::connect(&path).is_err()
-        {
-            continue;
-        }
-        if let Some(want) = want_cwd
-            && session_cwd(&path).as_deref() != Some(want)
-        {
-            continue;
-        }
-        let modified = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        if best.as_ref().is_none_or(|(t, _)| modified > *t) {
-            best = Some((modified, path));
-        }
-    }
-    best.map(|(_, path)| path)
 }
 
 /// Sends `message` to the wrapper listening on `socket`.
@@ -236,7 +198,7 @@ pub fn send(socket: &Path, message: &[u8]) -> io::Result<()> {
 /// A discovered session: its wrapper pid, whether it still accepts
 /// connections, and the working directory it was started in (if recorded).
 pub struct SessionInfo {
-    pub pid: u32,
+    pub pid: Option<u32>,
     pub alive: bool,
     pub cwd: Option<PathBuf>,
 }
@@ -250,26 +212,29 @@ pub fn list_sessions() -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_none_or(|e| e != "sock")
-            || path.file_name().is_some_and(|n| n == LATEST_LINK)
-        {
+        if path.extension().is_none_or(|e| e != "sock") {
             continue;
         }
-        let Some(pid) = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .and_then(|s| s.parse().ok())
-        else {
-            continue;
-        };
+        let (pid, cwd) = read_info(&path.with_extension("info"));
         sessions.push(SessionInfo {
             pid,
             alive: UnixStream::connect(&path).is_ok(),
-            cwd: session_cwd(&path),
+            cwd,
         });
     }
     sessions.sort_unstable_by_key(|s| s.pid);
     sessions
+}
+
+/// Parses a `<hash>.info` file (`pid\ncwd`).
+fn read_info(info_path: &Path) -> (Option<u32>, Option<PathBuf>) {
+    let Ok(content) = std::fs::read_to_string(info_path) else {
+        return (None, None);
+    };
+    let mut lines = content.lines();
+    let pid = lines.next().and_then(|l| l.trim().parse().ok());
+    let cwd = lines.next().map(PathBuf::from);
+    (pid, cwd)
 }
 
 /// Builds the message text for `zediator send`.
@@ -339,72 +304,146 @@ mod tests {
         }
     }
 
-    fn with_runtime_dir<T>(test: impl FnOnce() -> T) -> T {
-        // Serialize env mutation across tests in this module.
+    /// Runs `test` with an isolated runtime dir and project root. Serialized,
+    /// because it mutates process-wide environment variables.
+    fn with_env<T>(project: &Path, test: impl FnOnce() -> T) -> T {
         static ENV_LOCK: Mutex<()> = Mutex::new(());
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        // SAFETY: guarded by ENV_LOCK; tests in this module run one at a time.
-        unsafe { std::env::set_var("ZEDIATOR_RUNTIME_DIR", dir.path()) };
+        // SAFETY: guarded by ENV_LOCK; these tests run one at a time.
+        unsafe {
+            std::env::set_var("ZEDIATOR_RUNTIME_DIR", dir.path());
+            std::env::set_var("ZED_WORKTREE_ROOT", project);
+        }
         let result = test();
-        unsafe { std::env::remove_var("ZEDIATOR_RUNTIME_DIR") };
+        unsafe {
+            std::env::remove_var("ZEDIATOR_RUNTIME_DIR");
+            std::env::remove_var("ZED_WORKTREE_ROOT");
+        }
         result
     }
 
     #[test]
     fn server_injects_bracketed_paste() {
-        with_runtime_dir(|| {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
             let capture = Capture::default();
             let sink = capture.0.clone();
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(capture)));
-            let server = IpcServer::start(writer).unwrap();
+            let server = IpcServer::bind_project().unwrap().serve(writer);
 
-            let socket = resolve_socket(None, None).unwrap();
+            let socket = resolve_socket(None).unwrap();
             send(&socket, b"src/main.rs:4 ").unwrap();
 
-            // The accept loop is asynchronous; poll briefly.
             for _ in 0..50 {
                 if !sink.lock().unwrap().is_empty() {
                     break;
                 }
                 thread::sleep(Duration::from_millis(10));
             }
-            let received = sink.lock().unwrap().clone();
-            assert_eq!(received, b"\x1b[200~src/main.rs:4 \x1b[201~");
-            drop(server);
-        });
-    }
-
-    #[test]
-    fn drop_removes_socket_and_latest_link() {
-        with_runtime_dir(|| {
-            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::start(writer).unwrap();
-            let socket = server.socket_path.clone();
-            assert!(socket.exists());
-            drop(server);
-            assert!(!socket.exists());
-            assert!(!socket.with_file_name(LATEST_LINK).exists());
-        });
-    }
-
-    #[test]
-    fn resolve_prefers_explicit_socket_and_pid() {
-        with_runtime_dir(|| {
-            let explicit = PathBuf::from("/tmp/explicit.sock");
             assert_eq!(
-                resolve_socket(None, Some(explicit.clone())).unwrap(),
-                explicit
+                sink.lock().unwrap().clone(),
+                b"\x1b[200~src/main.rs:4 \x1b[201~"
             );
-            let by_pid = resolve_socket(Some(1234), None).unwrap();
-            assert!(by_pid.ends_with("1234.sock"));
+            drop(server);
         });
     }
 
     #[test]
-    fn resolve_fails_when_no_session() {
-        with_runtime_dir(|| {
-            assert!(resolve_socket(None, None).is_err());
+    fn resolves_this_projects_socket() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
+            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let resolved = resolve_socket(None).unwrap();
+            assert_eq!(resolved, socket_path_for(&canonical(project.path())));
+            assert!(UnixStream::connect(&resolved).is_ok());
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn second_session_in_same_project_is_refused() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
+            let first = IpcServer::bind_project().unwrap().serve(writer);
+            let err = IpcServer::bind_project()
+                .err()
+                .expect("second bind must fail");
+            assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+            drop(first);
+        });
+    }
+
+    #[test]
+    fn different_projects_get_distinct_sockets() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        assert_ne!(
+            socket_path_for(&canonical(a.path())),
+            socket_path_for(&canonical(b.path()))
+        );
+    }
+
+    #[test]
+    fn resolve_errors_without_a_session() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            assert!(resolve_socket(None).is_err());
+        });
+    }
+
+    #[test]
+    fn resolve_prefers_explicit_socket() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            let explicit = PathBuf::from("/tmp/explicit.sock");
+            assert_eq!(resolve_socket(Some(explicit.clone())).unwrap(), explicit);
+        });
+    }
+
+    #[test]
+    fn stale_socket_is_taken_over() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            // Leave a dead socket file behind, then bind: it should succeed.
+            let path = socket_path_for(&canonical(project.path()));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            drop(UnixListener::bind(&path).unwrap()); // bound then closed -> dead
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
+            let server = IpcServer::bind_project().unwrap().serve(writer);
+            assert!(UnixStream::connect(socket_path_for(&canonical(project.path()))).is_ok());
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn drop_removes_socket_and_info() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
+            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let socket = socket_path_for(&canonical(project.path()));
+            let info = socket.with_extension("info");
+            assert!(socket.exists() && info.exists());
+            drop(server);
+            assert!(!socket.exists() && !info.exists());
+        });
+    }
+
+    #[test]
+    fn list_sessions_reports_pid_and_cwd() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
+            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let sessions = list_sessions();
+            assert_eq!(sessions.len(), 1);
+            assert!(sessions[0].alive);
+            assert_eq!(sessions[0].pid, Some(std::process::id()));
+            assert_eq!(sessions[0].cwd, Some(canonical(project.path())));
+            drop(server);
         });
     }
 
@@ -423,12 +462,10 @@ mod tests {
 
     #[test]
     fn compose_message_fence_avoids_backtick_collision() {
-        // Selection contains a ``` fence: the wrapper must use a longer one.
         let text = "before\n```rust\nfn x() {}\n```\nafter";
         let msg = String::from_utf8(compose_message(Some("a.rs"), None, Some(text), &[])).unwrap();
-        assert!(msg.contains("````\n")); // 4-backtick fence
-        assert!(msg.contains(text)); // selection preserved verbatim
-        // The wrapping fence encloses the whole selection exactly once.
+        assert!(msg.contains("````\n"));
+        assert!(msg.contains(text));
         assert_eq!(msg.matches("````").count(), 2);
     }
 
@@ -438,77 +475,5 @@ mod tests {
         assert_eq!(longest_backtick_run("a `b` c"), 1);
         assert_eq!(longest_backtick_run("```rust"), 3);
         assert_eq!(longest_backtick_run("`` then ````"), 4);
-    }
-
-    /// Binds a live socket named `<pid>.sock` in the runtime dir and records
-    /// `cwd` in its sidecar. Returns the listener (keep it alive) and path.
-    fn spawn_fake_session(pid: u32, cwd: &Path) -> (UnixListener, PathBuf) {
-        let dir = socket_dir();
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(format!("{pid}.sock"));
-        let listener = UnixListener::bind(&path).unwrap();
-        std::fs::write(path.with_extension("cwd"), cwd.to_string_lossy().as_bytes()).unwrap();
-        (listener, path)
-    }
-
-    #[test]
-    fn routes_to_session_matching_zed_worktree_root() {
-        with_runtime_dir(|| {
-            let proj_a = tempfile::tempdir().unwrap();
-            let proj_b = tempfile::tempdir().unwrap();
-            let (_a, sock_a) = spawn_fake_session(1001, proj_a.path());
-            let (_b, _sock_b) = spawn_fake_session(1002, proj_b.path());
-
-            // SAFETY: guarded by with_runtime_dir's ENV_LOCK.
-            unsafe { std::env::set_var("ZED_WORKTREE_ROOT", proj_a.path()) };
-            let resolved = resolve_socket(None, None).unwrap();
-            unsafe { std::env::remove_var("ZED_WORKTREE_ROOT") };
-
-            assert_eq!(canonical(&resolved), canonical(&sock_a));
-        });
-    }
-
-    #[test]
-    fn falls_back_to_newest_when_no_cwd_match() {
-        with_runtime_dir(|| {
-            let proj = tempfile::tempdir().unwrap();
-            let other = tempfile::tempdir().unwrap();
-            let (_s, sock) = spawn_fake_session(2001, proj.path());
-
-            // Editor project has no matching session -> newest live wins.
-            unsafe { std::env::set_var("ZED_WORKTREE_ROOT", other.path()) };
-            let resolved = resolve_socket(None, None).unwrap();
-            unsafe { std::env::remove_var("ZED_WORKTREE_ROOT") };
-
-            assert_eq!(canonical(&resolved), canonical(&sock));
-        });
-    }
-
-    #[test]
-    fn list_sessions_reports_cwd() {
-        with_runtime_dir(|| {
-            let proj = tempfile::tempdir().unwrap();
-            let (_s, _sock) = spawn_fake_session(3001, proj.path());
-            let sessions = list_sessions();
-            assert_eq!(sessions.len(), 1);
-            assert_eq!(sessions[0].pid, 3001);
-            assert!(sessions[0].alive);
-            assert_eq!(
-                sessions[0].cwd.as_deref().map(canonical),
-                Some(canonical(proj.path()))
-            );
-        });
-    }
-
-    #[test]
-    fn drop_removes_cwd_sidecar() {
-        with_runtime_dir(|| {
-            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::start(writer).unwrap();
-            let sidecar = server.socket_path.with_extension("cwd");
-            assert!(sidecar.exists());
-            drop(server);
-            assert!(!sidecar.exists());
-        });
     }
 }

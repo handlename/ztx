@@ -30,7 +30,8 @@ zediator run -- <agent-cli>
 │ hint       path extraction + in-place labels           │
 │            (modal list fallback on primary screen)     │
 │ export     transcript→Markdown / capture→Markdown      │
-│ ipc        Unix socket server; `send` client           │
+│ ipc        per-project Unix socket (cwd-hash name);    │
+│            `send` client; one session per project      │
 │ adapter    trait + ClaudeCode / Antigravity / fallback │
 │ setup      Zed tasks.json / keymap.json merging        │
 └────────────────────────────────────────────────────────┘

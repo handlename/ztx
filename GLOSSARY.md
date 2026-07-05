@@ -17,6 +17,6 @@
 | **Hint mode** | `ctrl-] f`: an overlay labeling file paths found in the scrollback; typing a label opens that path in the editor (tmux-thumbs style). |
 | **Export** | Converting the session log to Markdown and opening it in the editor (`ctrl-] e` or `zediator export`). |
 | **IPC socket** | Per-wrapper Unix socket (`<pid>.sock`) accepting messages from `zediator send`, injected into the child as a bracketed paste. |
-| **`latest.sock`** | Symlink to the most recently started wrapper's socket; the default target for `zediator send`. |
+| **Project socket** | Each session's socket is named by a hash of its project directory (`<hash>.sock`), so `zediator send` finds it in O(1) from the project root. One session per project; a sibling `<hash>.info` records pid + cwd for `sessions`. |
 | **Bracketed paste** | Terminal convention (`ESC[200~ … ESC[201~`) marking pasted text, so multi-line injections arrive as a single paste. |
 | **Alternate screen** | The full-screen terminal buffer used by TUIs (vim, less). Not part of the scrollback capture; exports note its absence. |
