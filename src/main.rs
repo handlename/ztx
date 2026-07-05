@@ -113,8 +113,14 @@ fn run_sessions() -> std::io::Result<()> {
         );
         return Ok(());
     }
-    for (pid, alive) in sessions {
-        println!("{pid}\t{}", if alive { "alive" } else { "stale" });
+    for session in sessions {
+        let state = if session.alive { "alive" } else { "stale" };
+        let cwd = session
+            .cwd
+            .as_deref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        println!("{}\t{state}\t{cwd}", session.pid);
     }
     Ok(())
 }

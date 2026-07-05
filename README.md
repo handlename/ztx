@@ -72,9 +72,15 @@ Run `zediator setup zed` once. It merges (with confirmation and a backup):
 - a keybinding `cmd-alt-z` into `~/.config/zed/keymap.json`
 
 After that, selecting text in the editor and pressing `cmd-alt-z` sends
-`file:line` plus the selected text into the most recent zediator session.
-Zed's built-in `agent::AddSelectionToThread` (`cmd->`) also works with
-Terminal Threads and needs no setup.
+`file:line` plus the selected text into the zediator session running in the
+same project. Zed's built-in `agent::AddSelectionToThread` (`cmd->`) also
+works with Terminal Threads and needs no setup.
+
+Multiple sessions can run at once. A bare `zediator send` routes to the live
+session whose working directory matches the editor's project root
+(`ZED_WORKTREE_ROOT`); if several run in the same project, the most recent
+wins. Target a specific one with `zediator sessions` (shows pid + cwd) and
+`zediator send --pid <PID> …`.
 
 ## Configuration
 
