@@ -2,29 +2,24 @@
 //
 // Sends the current editor selection into the running `zediator run` session.
 //
-// NOTE on `command`: a Zed task inherits a minimal PATH, so `cargo` (from
-// ~/.cargo/bin) and an uninstalled `zediator` are typically NOT found, and
-// `cargo run` additionally requires the task cwd to be the crate root. We
-// therefore point at the built binary by absolute path, which works
-// regardless of PATH/cwd. During development, `cargo build` keeps this
-// debug binary current — no reinstall needed.
+// The selection is read from the ZED_* ENVIRONMENT VARIABLES (via
+// `--from-zed-env`), not passed as arguments. Zed runs tasks through
+// `zsh -i -c "<command> <args>"` and interpolates $ZED_SELECTED_TEXT into
+// that command line, so passing the selection as an arg makes the shell
+// re-execute it (e.g. selecting prose that contains backticks or `mise
+// exec` runs those as commands). Reading from the environment avoids this.
 //
-// Portable alternative (for machines other than this one): run
+// `command` uses the built binary by absolute path: a Zed task inherits a
+// minimal PATH, so `cargo`/an uninstalled `zediator` are not found, and
+// `cargo run` also needs the crate root as cwd. During development,
+// `cargo build` keeps this debug binary current. Portable alternative:
 // `cargo install --path .` and set "command": "zediator".
 [
   {
     "label": "zediator: send selection",
     "command": "$ZED_WORKTREE_ROOT/target/debug/zediator",
-    "args": [
-      "send",
-      "--file",
-      "$ZED_RELATIVE_FILE",
-      "--line",
-      "$ZED_ROW",
-      "--text",
-      "$ZED_SELECTED_TEXT",
-    ],
-    // "hide": "always",
-    // "reveal": "never",
+    "args": ["send", "--from-zed-env"],
+
+    "reveal": "never",
   },
 ]

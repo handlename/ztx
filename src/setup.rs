@@ -29,12 +29,11 @@ fn task_entry() -> Value {
     json!({
         "label": TASK_LABEL,
         "command": "zediator",
-        "args": [
-            "send",
-            "--file", "$ZED_RELATIVE_FILE",
-            "--line", "$ZED_ROW",
-            "--text", "$ZED_SELECTED_TEXT"
-        ],
+        // `--from-zed-env` reads the selection from the ZED_* environment
+        // variables. Passing them as $ZED_* args instead would let Zed's
+        // shell re-execute the selected text (it interpolates into a
+        // `zsh -c "..."` line), so keep the selection off the command line.
+        "args": ["send", "--from-zed-env"],
         "reveal": "never",
         "hide": "always"
     })

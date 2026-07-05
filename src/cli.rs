@@ -44,17 +44,27 @@ pub enum Command {
     },
 
     /// Send a file reference / selected text into a running session
-    /// (designed to be called from a Zed task with $ZED_* variables)
+    /// (designed to be called from a Zed task; see `--from-zed-env`)
     Send {
-        /// File to reference (e.g. $ZED_RELATIVE_FILE)
+        /// Read file/line/text from the ZED_RELATIVE_FILE, ZED_ROW and
+        /// ZED_SELECTED_TEXT environment variables instead of flags.
+        ///
+        /// Prefer this in Zed tasks: Zed runs tasks through `zsh -c "..."`
+        /// and interpolates $ZED_* into the command line, so passing the
+        /// selection as an argument lets the shell re-execute it. Reading
+        /// the values from the environment avoids that injection entirely.
+        #[arg(long)]
+        from_zed_env: bool,
+
+        /// File to reference (e.g. a path string)
         #[arg(long)]
         file: Option<String>,
 
-        /// Line number to reference (e.g. $ZED_ROW)
+        /// Line number to reference
         #[arg(long)]
         line: Option<u32>,
 
-        /// Selected text to attach as a fenced block (e.g. $ZED_SELECTED_TEXT)
+        /// Selected text to attach as a fenced block
         #[arg(long)]
         text: Option<String>,
 
@@ -127,6 +137,15 @@ mod tests {
         };
         assert_eq!(title_mode, Some(crate::title::TitleMode::Managed));
         assert_eq!(adapter, crate::adapter::AdapterKind::Claude);
+    }
+
+    #[test]
+    fn parses_send_from_zed_env() {
+        let cli = Cli::try_parse_from(["zediator", "send", "--from-zed-env"]).unwrap();
+        let Command::Send { from_zed_env, .. } = cli.command else {
+            panic!("expected send subcommand");
+        };
+        assert!(from_zed_env);
     }
 
     #[test]

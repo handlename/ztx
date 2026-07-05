@@ -43,13 +43,22 @@ fn main() -> ExitCode {
         }
         cli::Command::Export { adapter, stdout } => report(run_export(adapter, stdout)),
         cli::Command::Send {
+            from_zed_env,
             file,
             line,
             text,
             pid,
             socket,
             message,
-        } => report(run_send(file, line, text, pid, socket, message)),
+        } => report(run_send(
+            from_zed_env,
+            file,
+            line,
+            text,
+            pid,
+            socket,
+            message,
+        )),
         cli::Command::Sessions => report(run_sessions()),
         cli::Command::Setup { target } => match target {
             cli::SetupTarget::Zed { yes } => report(setup::zed(yes)),
@@ -67,18 +76,28 @@ fn report(result: std::io::Result<()>) -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_send(
-    file: Option<String>,
-    line: Option<u32>,
-    text: Option<String>,
+    from_zed_env: bool,
+    mut file: Option<String>,
+    mut line: Option<u32>,
+    mut text: Option<String>,
     pid: Option<u32>,
     socket: Option<std::path::PathBuf>,
     message: Vec<String>,
 ) -> std::io::Result<()> {
+    // Pull the selection from the environment when asked. Explicit flags win
+    // over env values so the flag form stays usable for scripting/testing.
+    if from_zed_env {
+        let env_nonempty = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
+        file = file.or_else(|| env_nonempty("ZED_RELATIVE_FILE"));
+        line = line.or_else(|| env_nonempty("ZED_ROW").and_then(|v| v.parse().ok()));
+        text = text.or_else(|| env_nonempty("ZED_SELECTED_TEXT"));
+    }
     let payload = ipc::compose_message(file.as_deref(), line, text.as_deref(), &message);
     if payload.is_empty() {
         return Err(std::io::Error::other(
-            "nothing to send (pass --file/--text or a message)",
+            "nothing to send (pass --file/--text, a message, or --from-zed-env)",
         ));
     }
     let target = ipc::resolve_socket(pid, socket)?;

@@ -58,7 +58,8 @@ wrapped CLI keeps its entire keymap. Press `ctrl-]` twice to send a literal
 zediator run [--adapter auto|claude|antigravity|none]
              [--title-mode passthrough|managed|prefix] -- <cli> [args...]
 zediator export [--stdout]        # export the latest session for this cwd
-zediator send --file F --line N --text "..."   # inject into a running session
+zediator send --from-zed-env      # inject the Zed selection (reads ZED_* env)
+zediator send --file F --line N --text "..."   # inject explicitly
 zediator sessions                 # list running wrapper sessions
 zediator setup zed [--yes]        # install the Zed task + keybinding
 ```
