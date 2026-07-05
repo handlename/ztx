@@ -220,12 +220,31 @@ pub fn compose_message(
     if let Some(text) = text
         && !text.is_empty()
     {
-        message.push_str(&format!("\n```\n{text}\n```\n"));
+        // Use a fence longer than any backtick run in the selection, so
+        // selecting Markdown that itself contains ``` blocks does not close
+        // the fence early.
+        let fence = "`".repeat(longest_backtick_run(text).max(2) + 1);
+        message.push_str(&format!("\n{fence}\n{text}\n{fence}\n"));
     }
     if !rest.is_empty() {
         message.push_str(&rest.join(" "));
     }
     message.into_bytes()
+}
+
+/// Length of the longest consecutive backtick run in `s`.
+fn longest_backtick_run(s: &str) -> usize {
+    let mut longest = 0;
+    let mut current = 0;
+    for ch in s.chars() {
+        if ch == '`' {
+            current += 1;
+            longest = longest.max(current);
+        } else {
+            current = 0;
+        }
+    }
+    longest
 }
 
 #[cfg(test)]
@@ -327,5 +346,24 @@ mod tests {
             b"a.rs \n```\nlet x;\n```\n"
         );
         assert_eq!(compose_message(None, None, None, &["hi".into()]), b"hi");
+    }
+
+    #[test]
+    fn compose_message_fence_avoids_backtick_collision() {
+        // Selection contains a ``` fence: the wrapper must use a longer one.
+        let text = "before\n```rust\nfn x() {}\n```\nafter";
+        let msg = String::from_utf8(compose_message(Some("a.rs"), None, Some(text), &[])).unwrap();
+        assert!(msg.contains("````\n")); // 4-backtick fence
+        assert!(msg.contains(text)); // selection preserved verbatim
+        // The wrapping fence encloses the whole selection exactly once.
+        assert_eq!(msg.matches("````").count(), 2);
+    }
+
+    #[test]
+    fn longest_backtick_run_counts_consecutive() {
+        assert_eq!(longest_backtick_run("no ticks"), 0);
+        assert_eq!(longest_backtick_run("a `b` c"), 1);
+        assert_eq!(longest_backtick_run("```rust"), 3);
+        assert_eq!(longest_backtick_run("`` then ````"), 4);
     }
 }
