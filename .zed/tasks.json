@@ -1,10 +1,20 @@
 // Project tasks configuration. See https://zed.dev/docs/tasks for documentation.
 //
-// Example:
+// Sends the current editor selection into the running `zediator run` session.
+//
+// NOTE on `command`: a Zed task inherits a minimal PATH, so `cargo` (from
+// ~/.cargo/bin) and an uninstalled `zediator` are typically NOT found, and
+// `cargo run` additionally requires the task cwd to be the crate root. We
+// therefore point at the built binary by absolute path, which works
+// regardless of PATH/cwd. During development, `cargo build` keeps this
+// debug binary current — no reinstall needed.
+//
+// Portable alternative (for machines other than this one): run
+// `cargo install --path .` and set "command": "zediator".
 [
   {
     "label": "zediator: send selection",
-    "command": "zediator",
+    "command": "$ZED_WORKTREE_ROOT/target/debug/zediator",
     "args": [
       "send",
       "--file",
@@ -14,7 +24,7 @@
       "--text",
       "$ZED_SELECTED_TEXT",
     ],
-    "hide": "always",
-    "reveal": "never",
+    // "hide": "always",
+    // "reveal": "never",
   },
 ]
