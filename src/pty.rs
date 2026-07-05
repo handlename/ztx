@@ -87,15 +87,24 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     // title thread); the gate keeps escape sequences from interleaving.
     let stdout_gate = Arc::new(Mutex::new(()));
 
+    let tap_shared: Arc<Mutex<TapShared>> = TermTap::shared(None);
+    tap_shared.lock().expect("tap lock poisoned").screen_rows = current_size().rows;
+
     // Resize events and termination signals are handled on a dedicated thread.
     // The PTY master must live there for TIOCSWINSZ, so it moves into the closure.
     let mut signals = Signals::new([SIGWINCH, SIGTERM, SIGHUP, SIGINT])?;
     let signal_handle = signals.handle();
+    let tap_for_signals = tap_shared.clone();
     let signal_thread = thread::spawn(move || {
         for signal in &mut signals {
             match signal {
                 SIGWINCH => {
-                    let _ = master.resize(current_size());
+                    let size = current_size();
+                    let _ = master.resize(size);
+                    tap_for_signals
+                        .lock()
+                        .expect("tap lock poisoned")
+                        .screen_rows = size.rows;
                 }
                 _ => {
                     if let Some(pid) = child_pid.and_then(|p| i32::try_from(p).ok()) {
@@ -108,8 +117,6 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
             }
         }
     });
-
-    let tap_shared: Arc<Mutex<TapShared>> = TermTap::shared(None);
 
     // IPC socket for `zediator send`. Failure is non-fatal: everything else
     // works without the selection-sharing channel.
@@ -420,9 +427,12 @@ fn current_mouse_modes(tap: &Arc<Mutex<TapShared>>) -> Vec<u16> {
 }
 
 /// Reports the current terminal size, falling back to 80x24 when unavailable
-/// (e.g. when stdin is not a TTY).
+/// or nonsensical (a PTY can report 0x0, e.g. under `expect`).
 fn current_size() -> PtySize {
-    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (cols, rows) = match crossterm::terminal::size() {
+        Ok((cols, rows)) if cols > 0 && rows > 0 => (cols, rows),
+        _ => (80, 24),
+    };
     PtySize {
         rows,
         cols,

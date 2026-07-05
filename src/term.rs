@@ -41,6 +41,9 @@ pub struct TapShared {
     /// ...). Overlays disable these temporarily so mouse motion does not
     /// flood stdin while zediator reads a key.
     pub mouse_modes: std::collections::BTreeSet<u16>,
+    /// Terminal height in rows; kept current by the resize handler and used
+    /// to size the alternate-screen grid.
+    pub screen_rows: u16,
 }
 
 impl TapShared {
@@ -51,6 +54,7 @@ impl TapShared {
             alt_screen: false,
             alt_snapshot: Vec::new(),
             mouse_modes: std::collections::BTreeSet::new(),
+            screen_rows: 24,
         }
     }
 }
@@ -183,37 +187,39 @@ impl TermTap {
     }
 }
 
-/// Row grid for the alternate screen. Rows grow on demand (no terminal-size
-/// plumbing); the top scrolls away beyond [`ALT_MAX_ROWS`]. Scroll regions
-/// and other exotic controls are ignored — the goal is readable text, not a
-/// pixel-perfect emulation.
+/// Fixed-height row grid for the alternate screen, with DECSTBM scroll
+/// regions. Full-screen agent CLIs scroll their content area with
+/// `CSI t;b r` + `CSI n S/T` (observed from Claude Code), so scroll
+/// operations must shift the grid or hint-label coordinates drift. Wide
+/// characters occupy one cell (display columns are recomputed with
+/// unicode-width at draw time).
 struct AltGrid {
     rows: Vec<Vec<char>>,
+    height: usize,
     row: usize,
     col: usize,
+    /// Scroll region, 0-based inclusive margins (DECSTBM).
+    margin_top: usize,
+    margin_bottom: usize,
+    /// Cursor saved by DECSC (ESC 7), restored by DECRC (ESC 8).
+    saved_cursor: Option<(usize, usize)>,
 }
 
 impl AltGrid {
-    fn new() -> Self {
+    fn new(height: usize) -> Self {
+        let height = height.clamp(1, ALT_MAX_ROWS);
         Self {
-            rows: vec![Vec::new()],
+            rows: vec![Vec::new(); height],
+            height,
             row: 0,
             col: 0,
-        }
-    }
-
-    fn ensure_row(&mut self) {
-        while self.row >= self.rows.len() {
-            self.rows.push(Vec::new());
-        }
-        while self.rows.len() > ALT_MAX_ROWS {
-            self.rows.remove(0);
-            self.row = self.row.saturating_sub(1);
+            margin_top: 0,
+            margin_bottom: height - 1,
+            saved_cursor: None,
         }
     }
 
     fn put(&mut self, c: char) {
-        self.ensure_row();
         let line = &mut self.rows[self.row];
         while line.len() < self.col {
             line.push(' ');
@@ -227,13 +233,79 @@ impl AltGrid {
     }
 
     fn move_to(&mut self, row: usize, col: usize) {
-        self.row = row.min(ALT_MAX_ROWS - 1);
+        self.row = row.min(self.height - 1);
         self.col = col;
-        self.ensure_row();
+    }
+
+    /// Line feed: scrolls the region when the cursor sits on its bottom
+    /// margin, otherwise just moves down.
+    fn line_feed(&mut self) {
+        if self.row == self.margin_bottom {
+            self.scroll_up(1);
+        } else {
+            self.row = (self.row + 1).min(self.height - 1);
+        }
+    }
+
+    /// DECSTBM. Per spec the cursor moves to home afterwards.
+    fn set_margins(&mut self, top: u16, bottom: u16) {
+        let top = (top.max(1) as usize - 1).min(self.height - 1);
+        let bottom = match bottom {
+            0 => self.height - 1,
+            b => (b as usize - 1).min(self.height - 1),
+        };
+        if top < bottom {
+            self.margin_top = top;
+            self.margin_bottom = bottom;
+        } else {
+            self.margin_top = 0;
+            self.margin_bottom = self.height - 1;
+        }
+        self.row = 0;
+        self.col = 0;
+    }
+
+    /// SU: shifts the scroll region up, dropping its top rows.
+    fn scroll_up(&mut self, n: usize) {
+        for _ in 0..n.min(self.margin_bottom - self.margin_top + 1) {
+            self.rows.remove(self.margin_top);
+            self.rows.insert(self.margin_bottom, Vec::new());
+        }
+    }
+
+    /// SD: shifts the scroll region down, dropping its bottom rows.
+    fn scroll_down(&mut self, n: usize) {
+        for _ in 0..n.min(self.margin_bottom - self.margin_top + 1) {
+            self.rows.remove(self.margin_bottom);
+            self.rows.insert(self.margin_top, Vec::new());
+        }
+    }
+
+    /// IL: inserts blank lines at the cursor, pushing rows toward the bottom
+    /// margin.
+    fn insert_lines(&mut self, n: usize) {
+        if self.row < self.margin_top || self.row > self.margin_bottom {
+            return;
+        }
+        for _ in 0..n.min(self.margin_bottom - self.row + 1) {
+            self.rows.remove(self.margin_bottom);
+            self.rows.insert(self.row, Vec::new());
+        }
+    }
+
+    /// DL: deletes lines at the cursor, pulling rows up from the bottom
+    /// margin.
+    fn delete_lines(&mut self, n: usize) {
+        if self.row < self.margin_top || self.row > self.margin_bottom {
+            return;
+        }
+        for _ in 0..n.min(self.margin_bottom - self.row + 1) {
+            self.rows.remove(self.row);
+            self.rows.insert(self.margin_bottom, Vec::new());
+        }
     }
 
     fn erase_line(&mut self, mode: u16) {
-        self.ensure_row();
         let col = self.col;
         let line = &mut self.rows[self.row];
         match mode {
@@ -250,11 +322,12 @@ impl AltGrid {
     }
 
     fn erase_display(&mut self, mode: u16) {
-        self.ensure_row();
         match mode {
             0 => {
                 self.erase_line(0);
-                self.rows.truncate(self.row + 1);
+                for line in &mut self.rows[self.row + 1..] {
+                    line.clear();
+                }
             }
             1 => {
                 for line in &mut self.rows[..self.row] {
@@ -318,10 +391,13 @@ impl Performer {
     fn set_alt_screen(&mut self, on: bool) {
         // The primary partial line is kept: DECSET 1049 saves and restores
         // the primary screen, so output resumes where it left off.
-        self.alt = on.then(AltGrid::new);
+        let mut shared = self.shared.lock().expect("tap lock poisoned");
+        shared.alt_screen = on;
+        let height = shared.screen_rows as usize;
+        drop(shared);
+        self.alt = on.then(|| AltGrid::new(height));
         self.alt_dirty = true;
-        self.shared.lock().expect("tap lock poisoned").alt_screen = on;
-        tracing::debug!(alt_screen = on, "screen mode changed");
+        tracing::debug!(alt_screen = on, height, "screen mode changed");
     }
 
     fn publish_alt_snapshot(&mut self) {
@@ -352,10 +428,7 @@ impl Perform for Performer {
     fn execute(&mut self, byte: u8) {
         if let Some(grid) = self.alt.as_mut() {
             match byte {
-                b'\n' => {
-                    grid.row += 1;
-                    grid.ensure_row();
-                }
+                b'\n' => grid.line_feed(),
                 b'\r' => grid.col = 0,
                 0x08 => grid.col = grid.col.saturating_sub(1),
                 b'\t' => {
@@ -424,24 +497,26 @@ impl Perform for Performer {
             match action {
                 'H' | 'f' => grid.move_to(n - 1, (second.max(1) as usize) - 1),
                 'A' => grid.row = grid.row.saturating_sub(n),
-                'B' => {
-                    grid.row += n;
-                    grid.ensure_row();
-                }
+                'B' => grid.row = (grid.row + n).min(grid.height - 1),
                 'C' => grid.col += n,
                 'D' => grid.col = grid.col.saturating_sub(n),
                 'E' => {
-                    grid.row += n;
+                    grid.row = (grid.row + n).min(grid.height - 1);
                     grid.col = 0;
-                    grid.ensure_row();
                 }
                 'F' => {
                     grid.row = grid.row.saturating_sub(n);
                     grid.col = 0;
                 }
                 'G' => grid.col = n - 1,
+                'd' => grid.row = (n - 1).min(grid.height - 1), // VPA
                 'K' => grid.erase_line(first),
                 'J' => grid.erase_display(first),
+                'r' => grid.set_margins(first, second), // DECSTBM
+                'S' => grid.scroll_up(n),
+                'T' => grid.scroll_down(n),
+                'L' => grid.insert_lines(n),
+                'M' => grid.delete_lines(n),
                 _ => return,
             }
             self.alt_dirty = true;
@@ -484,6 +559,27 @@ impl Perform for Performer {
         }
     }
 
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        // DECSC/DECRC: Claude Code saves and restores the cursor around its
+        // partial redraws; without this the tracked cursor drifts.
+        if !intermediates.is_empty() {
+            return;
+        }
+        if let Some(grid) = self.alt.as_mut() {
+            match byte {
+                b'7' => grid.saved_cursor = Some((grid.row, grid.col)),
+                b'8' => {
+                    if let Some((row, col)) = grid.saved_cursor {
+                        grid.row = row.min(grid.height - 1);
+                        grid.col = col;
+                        self.alt_dirty = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
         // OSC 0 (icon+title) / OSC 2 (title): remember the child's title so
         // the title module can re-emit or compose it.
@@ -499,7 +595,12 @@ mod tests {
     use super::*;
 
     fn feed(input: &[u8]) -> Arc<Mutex<TapShared>> {
+        feed_with_rows(24, input)
+    }
+
+    fn feed_with_rows(rows: u16, input: &[u8]) -> Arc<Mutex<TapShared>> {
         let shared = TermTap::shared(Some(8));
+        shared.lock().unwrap().screen_rows = rows;
         let mut tap = TermTap::new(shared.clone());
         tap.advance(input);
         tap.flush();
@@ -643,6 +744,59 @@ mod tests {
     fn tabs_expand_to_spaces() {
         let shared = feed(b"ab\tcd\n");
         assert_eq!(lines(&shared), ["ab      cd"]);
+    }
+
+    #[test]
+    fn decstbm_scroll_up_shifts_only_the_region() {
+        // Rows L1..L6; region rows 2-4 (1-based); scroll up by one.
+        let shared = feed_with_rows(
+            6,
+            b"\x1b[?1049h\
+              \x1b[1;1HL1\x1b[2;1HL2\x1b[3;1HL3\x1b[4;1HL4\x1b[5;1HL5\x1b[6;1HL6\
+              \x1b[2;4r\x1b[1S",
+        );
+        assert_eq!(snapshot(&shared), ["L1", "L3", "L4", "", "L5", "L6"]);
+    }
+
+    #[test]
+    fn decstbm_scroll_down_shifts_only_the_region() {
+        let shared = feed_with_rows(
+            6,
+            b"\x1b[?1049h\
+              \x1b[1;1HL1\x1b[2;1HL2\x1b[3;1HL3\x1b[4;1HL4\x1b[5;1HL5\x1b[6;1HL6\
+              \x1b[2;4r\x1b[1T",
+        );
+        assert_eq!(snapshot(&shared), ["L1", "", "L2", "L3", "L5", "L6"]);
+    }
+
+    #[test]
+    fn line_feed_at_bottom_margin_scrolls() {
+        let shared = feed_with_rows(4, b"\x1b[?1049hA\r\nB\r\nC\r\nD\r\nE");
+        assert_eq!(snapshot(&shared), ["B", "C", "D", "E"]);
+    }
+
+    #[test]
+    fn insert_and_delete_lines_respect_the_region() {
+        // IL at row 2 pushes rows down within the region.
+        let shared = feed_with_rows(
+            4,
+            b"\x1b[?1049h\x1b[1;1HA\x1b[2;1HB\x1b[3;1HC\x1b[4;1HD\x1b[2;1H\x1b[1L",
+        );
+        assert_eq!(snapshot(&shared), ["A", "", "B", "C"]);
+
+        let shared = feed_with_rows(
+            4,
+            b"\x1b[?1049h\x1b[1;1HA\x1b[2;1HB\x1b[3;1HC\x1b[4;1HD\x1b[2;1H\x1b[1M",
+        );
+        assert_eq!(snapshot(&shared), ["A", "C", "D"]);
+    }
+
+    #[test]
+    fn save_and_restore_cursor_keeps_positions() {
+        // Write at row 3, save, jump to row 1 and write, restore, write more:
+        // the continuation lands back on row 3.
+        let shared = feed_with_rows(6, b"\x1b[?1049h\x1b[3;1Habc\x1b7\x1b[1;1Htop\x1b8def");
+        assert_eq!(snapshot(&shared), ["top", "", "abcdef"]);
     }
 
     #[test]
