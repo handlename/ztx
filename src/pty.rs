@@ -295,7 +295,7 @@ fn handle_action(
     adapter: &SharedAdapter,
     tap: &Arc<Mutex<TapShared>>,
     gate: &Arc<Mutex<()>>,
-    stdin: &mut impl Read,
+    stdin: &mut impl crate::hint::HintInput,
 ) {
     tracing::debug!(?action, "prefix action triggered");
     match action {
@@ -322,18 +322,20 @@ fn handle_action(
                 ),
                 Err(err) => format!("zediator: state dump failed: {err} (press any key)"),
             };
+            let mouse_modes = current_mouse_modes(tap);
             let _gate = gate.lock().expect("stdout gate poisoned");
             let mut stdout = io::stdout();
-            let _ = crate::hint::show_message(stdin, &mut stdout, &message);
+            let _ = crate::hint::show_message(stdin, &mut stdout, &message, &mouse_modes);
         }
         crate::input::InputAction::Hint => {
             // Search the primary scrollback plus whatever is visible on the
             // alternate screen (full-screen CLIs like Claude Code live there).
-            let (lines, alt_screen) = {
+            let (lines, alt_screen, mouse_modes) = {
                 let guard = tap.lock().expect("tap lock poisoned");
                 let mut lines = guard.scrollback.recent(400);
                 lines.extend(guard.alt_snapshot.iter().cloned());
-                (lines, guard.alt_screen)
+                let modes: Vec<u16> = guard.mouse_modes.iter().copied().collect();
+                (lines, guard.alt_screen, modes)
             };
             let cwd = std::env::current_dir().unwrap_or_else(|_| "/".into());
             let candidates = crate::hint::extract_candidates(&lines, &cwd, 40);
@@ -353,6 +355,7 @@ fn handle_action(
                     stdin,
                     &mut stdout,
                     &format!("zediator: no file paths found{dump} (press any key)"),
+                    &mouse_modes,
                 );
                 return;
             }
@@ -360,7 +363,7 @@ fn handle_action(
             // repaint over the overlay; PTY backpressure holds its output.
             let _gate = gate.lock().expect("stdout gate poisoned");
             let mut stdout = io::stdout();
-            match crate::hint::pick(stdin, &mut stdout, &candidates) {
+            match crate::hint::pick(stdin, &mut stdout, &candidates, &mouse_modes) {
                 Ok(Some(index)) => {
                     let chosen = &candidates[index];
                     match crate::export::open_location(&chosen.path, chosen.line, chosen.column) {
@@ -377,6 +380,15 @@ fn handle_action(
             }
         }
     }
+}
+
+fn current_mouse_modes(tap: &Arc<Mutex<TapShared>>) -> Vec<u16> {
+    tap.lock()
+        .expect("tap lock poisoned")
+        .mouse_modes
+        .iter()
+        .copied()
+        .collect()
 }
 
 /// Reports the current terminal size, falling back to 80x24 when unavailable

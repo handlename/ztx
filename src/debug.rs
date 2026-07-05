@@ -34,7 +34,7 @@ pub fn dump_state(
     let seq = DUMP_SEQ.fetch_add(1, Ordering::Relaxed);
     let path = dir.join(format!("state-{}-{seq}.txt", std::process::id()));
 
-    let (alt_screen, last_title, alt_snapshot, captured, recent) = {
+    let (alt_screen, last_title, alt_snapshot, captured, recent, mouse_modes) = {
         let mut guard = tap.lock().expect("tap lock poisoned");
         (
             guard.alt_screen,
@@ -42,6 +42,7 @@ pub fn dump_state(
             guard.alt_snapshot.clone(),
             guard.scrollback.len(),
             guard.scrollback.dump().unwrap_or_default(),
+            guard.mouse_modes.iter().copied().collect::<Vec<u16>>(),
         )
     };
 
@@ -49,7 +50,7 @@ pub fn dump_state(
     out.push_str(&format!(
         "# zediator state dump\n\npid: {}\nalt_screen: {alt_screen}\n\
          last_child_title: {last_title:?}\nscrollback_lines: {captured}\n\
-         alt_snapshot_lines: {}\n\n## context\n{context}\n",
+         alt_snapshot_lines: {}\nmouse_modes: {mouse_modes:?}\n\n## context\n{context}\n",
         std::process::id(),
         alt_snapshot.len(),
     ));

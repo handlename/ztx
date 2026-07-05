@@ -37,6 +37,10 @@ pub struct TapShared {
     pub alt_screen: bool,
     /// Text of the alternate screen as currently drawn (empty on primary).
     pub alt_snapshot: Vec<String>,
+    /// Mouse-tracking DECSET modes the child has enabled (1000, 1002, 1006,
+    /// ...). Overlays disable these temporarily so mouse motion does not
+    /// flood stdin while zediator reads a key.
+    pub mouse_modes: std::collections::BTreeSet<u16>,
 }
 
 impl TapShared {
@@ -46,6 +50,7 @@ impl TapShared {
             last_title: None,
             alt_screen: false,
             alt_snapshot: Vec::new(),
+            mouse_modes: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -384,13 +389,30 @@ impl Perform for Performer {
         let first = iter.next().and_then(|p| p.first().copied()).unwrap_or(0);
         let second = iter.next().and_then(|p| p.first().copied()).unwrap_or(0);
 
-        // DECSET/DECRST alternate screen (1047/1049, legacy 47).
-        if intermediates.first() == Some(&b'?') && matches!(first, 47 | 1047 | 1049) {
-            match action {
-                'h' => self.set_alt_screen(true),
-                'l' => self.set_alt_screen(false),
-                _ => {}
+        // DECSET/DECRST private modes. A single CSI can carry several codes
+        // (e.g. `CSI ? 1002;1006 h`), so every parameter is inspected.
+        if intermediates.first() == Some(&b'?') && matches!(action, 'h' | 'l') {
+            let on = action == 'h';
+            let codes: Vec<u16> = params.iter().flatten().copied().collect();
+            for code in codes {
+                match code {
+                    // Alternate screen (1047/1049, legacy 47).
+                    47 | 1047 | 1049 => self.set_alt_screen(on),
+                    // Mouse tracking family.
+                    9 | 1000..=1003 | 1005 | 1006 | 1015 | 1016 => {
+                        let mut shared = self.shared.lock().expect("tap lock poisoned");
+                        if on {
+                            shared.mouse_modes.insert(code);
+                        } else {
+                            shared.mouse_modes.remove(&code);
+                        }
+                    }
+                    _ => {}
+                }
             }
+            return;
+        }
+        if intermediates.first() == Some(&b'?') {
             return;
         }
         if !intermediates.is_empty() {
@@ -621,5 +643,12 @@ mod tests {
     fn tabs_expand_to_spaces() {
         let shared = feed(b"ab\tcd\n");
         assert_eq!(lines(&shared), ["ab      cd"]);
+    }
+
+    #[test]
+    fn mouse_tracking_modes_are_tracked() {
+        let shared = feed(b"\x1b[?1002;1006h\x1b[?1002l");
+        let modes = shared.lock().unwrap().mouse_modes.clone();
+        assert_eq!(modes.into_iter().collect::<Vec<_>>(), [1006]);
     }
 }
