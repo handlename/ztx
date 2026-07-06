@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 /// Mediator between Zed terminal sessions and AI agent CLIs.
 #[derive(Parser)]
-#[command(name = "zediator", version, about)]
+#[command(name = "zedic", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -10,7 +10,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Run an agent CLI wrapped in the zediator PTY proxy
+    /// Run an agent CLI wrapped in the zedic PTY proxy
     Run {
         /// How to handle the child's OSC title sequences.
         /// Defaults to `managed` when an adapter matches, `passthrough` otherwise.
@@ -78,10 +78,10 @@ pub enum Command {
         message: Vec<String>,
     },
 
-    /// List running zediator sessions
+    /// List running zedic sessions
     Sessions,
 
-    /// Generate editor integration (keybinding + task) for zediator
+    /// Generate editor integration (keybinding + task) for zedic
     Setup {
         #[command(subcommand)]
         target: SetupTarget,
@@ -90,7 +90,7 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum SetupTarget {
-    /// Merge a zediator task and keybinding into the Zed configuration
+    /// Merge a zedic task and keybinding into the Zed configuration
     Zed {
         /// Apply changes without asking for confirmation
         #[arg(long)]
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn parses_run_with_trailing_args() {
-        let cli = Cli::try_parse_from(["zediator", "run", "--", "claude", "--continue"]).unwrap();
+        let cli = Cli::try_parse_from(["zedic", "run", "--", "claude", "--continue"]).unwrap();
         let Command::Run { command, .. } = cli.command else {
             panic!("expected run subcommand");
         };
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn parses_title_mode_and_adapter_flags() {
         let cli = Cli::try_parse_from([
-            "zediator",
+            "zedic",
             "run",
             "--title-mode",
             "managed",
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn parses_send_from_zed_env() {
-        let cli = Cli::try_parse_from(["zediator", "send", "--from-zed-env"]).unwrap();
+        let cli = Cli::try_parse_from(["zedic", "send", "--from-zed-env"]).unwrap();
         let Command::Send { from_zed_env, .. } = cli.command else {
             panic!("expected send subcommand");
         };
@@ -147,6 +147,6 @@ mod tests {
 
     #[test]
     fn run_requires_a_command() {
-        assert!(Cli::try_parse_from(["zediator", "run"]).is_err());
+        assert!(Cli::try_parse_from(["zedic", "run"]).is_err());
     }
 }

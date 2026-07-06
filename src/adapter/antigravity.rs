@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn missing_data_dir_yields_none() {
-        let mut adapter = AntigravityAdapter::new(PathBuf::from("/nonexistent/zediator-test"));
+        let mut adapter = AntigravityAdapter::new(PathBuf::from("/nonexistent/zedic-test"));
         assert_eq!(adapter.current_activity(), None);
         assert_eq!(adapter.transcript_path(), None);
     }

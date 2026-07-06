@@ -131,11 +131,11 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         }
     });
 
-    // Start serving `zediator send` on the socket claimed above (if any).
+    // Start serving `zedic send` on the socket claimed above (if any).
     // Kept alive for the session; dropped on exit to clean up the socket.
     let _ipc = bound.map(|b| b.serve(child_writer.clone()));
 
-    // stdin -> child, with zediator's prefix-key bindings peeled off when the
+    // stdin -> child, with zedic's prefix-key bindings peeled off when the
     // input is interactive. Left detached: reads from stdin cannot be
     // interrupted portably, and the thread dies with the process.
     let input_is_tty = io::stdin().is_terminal();
@@ -280,7 +280,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                 }
             }
             // Clear the title on exit so a stale activity name does not stick
-            // to the terminal after zediator is gone.
+            // to the terminal after zedic is gone.
             let _gate = gate.lock().expect("stdout gate poisoned");
             let _ = crate::title::emit_title(&mut stdout, "");
         })
@@ -331,10 +331,10 @@ fn handle_action(
         crate::input::InputAction::DumpState => {
             let message = match crate::debug::dump_state(tap, "manual dump (ctrl-] d)") {
                 Ok(path) => format!(
-                    "zediator: state dumped to {} (press any key)",
+                    "zedic: state dumped to {} (press any key)",
                     path.display()
                 ),
-                Err(err) => format!("zediator: state dump failed: {err} (press any key)"),
+                Err(err) => format!("zedic: state dump failed: {err} (press any key)"),
             };
             let mouse_modes = current_mouse_modes(tap);
             let _gate = gate.lock().expect("stdout gate poisoned");
@@ -397,7 +397,7 @@ fn handle_action(
                 let _ = crate::hint::show_message(
                     stdin,
                     &mut stdout,
-                    &format!("zediator: no file paths found{dump} (press any key)"),
+                    &format!("zedic: no file paths found{dump} (press any key)"),
                     &mouse_modes,
                 );
                 return;

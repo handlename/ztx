@@ -4,13 +4,13 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 
 /// Environment variable holding a tracing filter directive (e.g. `debug`,
-/// `zediator=trace`). Logging is disabled when unset.
-const LOG_ENV: &str = "ZEDIATOR_LOG";
+/// `zedic=trace`). Logging is disabled when unset.
+const LOG_ENV: &str = "ZEDIC_LOG";
 
 /// Environment variable overriding the log file path.
-const LOG_FILE_ENV: &str = "ZEDIATOR_LOG_FILE";
+const LOG_FILE_ENV: &str = "ZEDIC_LOG_FILE";
 
-/// Initializes file-based logging when `ZEDIATOR_LOG` is set.
+/// Initializes file-based logging when `ZEDIC_LOG` is set.
 ///
 /// Logs never go to stdout/stderr: the wrapper shares its terminal with the
 /// wrapped TUI, and any stray output would corrupt the child's screen.
@@ -39,9 +39,9 @@ pub fn init() -> Option<WorkerGuard> {
     Some(guard)
 }
 
-/// Resolves the log file path: `$ZEDIATOR_LOG_FILE`, or
-/// `$XDG_STATE_HOME/zediator/zediator.log`, falling back to
-/// `~/.local/state/zediator/zediator.log`.
+/// Resolves the log file path: `$ZEDIC_LOG_FILE`, or
+/// `$XDG_STATE_HOME/zedic/zedic.log`, falling back to
+/// `~/.local/state/zedic/zedic.log`.
 fn log_file_path() -> PathBuf {
     if let Ok(path) = std::env::var(LOG_FILE_ENV) {
         return PathBuf::from(path);
@@ -52,5 +52,5 @@ fn log_file_path() -> PathBuf {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".local/state")
         });
-    state_home.join("zediator").join("zediator.log")
+    state_home.join("zedic").join("zedic.log")
 }

@@ -36,7 +36,7 @@ fn main() -> ExitCode {
             match pty::run(&command, opts) {
                 Ok(code) => ExitCode::from(code.min(u8::MAX as u32) as u8),
                 Err(err) => {
-                    eprintln!("zediator: {err}");
+                    eprintln!("zedic: {err}");
                     ExitCode::FAILURE
                 }
             }
@@ -61,7 +61,7 @@ fn report(result: std::io::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("zediator: {err}");
+            eprintln!("zedic: {err}");
             ExitCode::FAILURE
         }
     }
@@ -97,7 +97,7 @@ fn run_sessions() -> std::io::Result<()> {
     let sessions = ipc::list_sessions();
     if sessions.is_empty() {
         println!(
-            "no running zediator sessions ({})",
+            "no running zedic sessions ({})",
             ipc::socket_dir().display()
         );
         return Ok(());

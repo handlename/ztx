@@ -1,6 +1,6 @@
 //! Output tap: observes the child's byte stream without modifying it.
 //!
-//! Design constraint (see DESIGN.md): zediator does not maintain a full
+//! Design constraint (see DESIGN.md): zedic does not maintain a full
 //! terminal emulator. It keeps two lightweight views of the child's output:
 //!
 //! - **Primary screen**: an ANSI-stripped, append-oriented line buffer
@@ -9,7 +9,7 @@
 //! - **Alternate screen**: a bounded row grid ([`AltGrid`]) tracking what is
 //!   *currently visible*. Full-screen agent CLIs (Claude Code 2.x runs on the
 //!   alternate screen) keep their own scrollback internally, so the visible
-//!   frame is all zediator can — and needs to — capture for hint mode and
+//!   frame is all zedic can — and needs to — capture for hint mode and
 //!   export snapshots.
 
 use std::collections::VecDeque;
@@ -39,7 +39,7 @@ pub struct TapShared {
     pub alt_snapshot: Vec<String>,
     /// Mouse-tracking DECSET modes the child has enabled (1000, 1002, 1006,
     /// ...). Overlays disable these temporarily so mouse motion does not
-    /// flood stdin while zediator reads a key.
+    /// flood stdin while zedic reads a key.
     pub mouse_modes: std::collections::BTreeSet<u16>,
     /// Terminal height in rows; kept current by the resize handler and used
     /// to size the alternate-screen grid.
@@ -133,7 +133,7 @@ impl Scrollback {
         let mut out = String::new();
         if self.dropped > 0 {
             out.push_str(&format!(
-                "[zediator: {} earliest lines dropped ({} MiB spill cap)]\n",
+                "[zedic: {} earliest lines dropped ({} MiB spill cap)]\n",
                 self.dropped,
                 SPILL_CAP_BYTES / 1024 / 1024,
             ));

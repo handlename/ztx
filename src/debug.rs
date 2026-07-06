@@ -3,8 +3,8 @@
 //! Two complementary mechanisms, usable for any feature (not tied to one
 //! investigation):
 //!
-//! - **Event log**: every subsystem traces through `ZEDIATOR_LOG` /
-//!   `ZEDIATOR_LOG_FILE` (see `logging.rs`) — screen-mode changes, title
+//! - **Event log**: every subsystem traces through `ZEDIC_LOG` /
+//!   `ZEDIC_LOG_FILE` (see `logging.rs`) — screen-mode changes, title
 //!   emissions, prefix actions, IPC injections, exports.
 //! - **State dump** (`ctrl-] d`, or automatic when a feature comes up
 //!   empty): snapshots the wrapper's internal state to a file so "why did X
@@ -25,7 +25,7 @@ pub fn dump_state(
     tap: &std::sync::Arc<Mutex<TapShared>>,
     context: &str,
 ) -> std::io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("zediator");
+    let dir = std::env::temp_dir().join("zedic");
     std::fs::create_dir_all(&dir)?;
     {
         use std::os::unix::fs::PermissionsExt;
@@ -48,7 +48,7 @@ pub fn dump_state(
 
     let mut out = String::new();
     out.push_str(&format!(
-        "# zediator state dump\n\npid: {}\nalt_screen: {alt_screen}\n\
+        "# zedic state dump\n\npid: {}\nalt_screen: {alt_screen}\n\
          last_child_title: {last_title:?}\nscrollback_lines: {captured}\n\
          alt_snapshot_lines: {}\nmouse_modes: {mouse_modes:?}\n\n## context\n{context}\n",
         std::process::id(),

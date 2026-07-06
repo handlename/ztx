@@ -1,9 +1,9 @@
 [package]
-name = "zediator"
+name = "zedic"
 version = "0.1.0"
 edition = "2024"
 description = "Mediator between Zed terminal sessions and AI agent CLIs"
-repository = "https://github.com/handlename/zediator"
+repository = "https://github.com/handlename/zedic"
 license = "MIT"
 
 [dependencies]

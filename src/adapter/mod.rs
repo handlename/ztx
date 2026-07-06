@@ -1,6 +1,6 @@
 //! CLI-specific adapters.
 //!
-//! The zediator core is agent-CLI agnostic; adapters raise the experience for
+//! The zedic core is agent-CLI agnostic; adapters raise the experience for
 //! known CLIs (session titles, structured transcript export). When no adapter
 //! matches, every feature falls back to PTY-recording quality.
 

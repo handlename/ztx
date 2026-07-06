@@ -1,13 +1,13 @@
 //! IPC channel (feature 4: pull editor selections into the session).
 //!
 //! Each wrapper listens on a Unix socket whose name is derived from the
-//! project directory it runs in, so `zediator send` resolves the target in
+//! project directory it runs in, so `zedic send` resolves the target in
 //! O(1): both sides hash the project root (`ZED_WORKTREE_ROOT`, else the
 //! current directory) to the same `<hash>.sock` path — no scanning, no
-//! registry. This assumes one session per project: `zediator run` refuses to
+//! registry. This assumes one session per project: `zedic run` refuses to
 //! start when a live session already owns the project's socket. `--socket`
 //! overrides the target explicitly. A sibling `<hash>.info` records pid and
-//! cwd for `zediator sessions` display only (never used for resolution).
+//! cwd for `zedic sessions` display only (never used for resolution).
 
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -26,7 +26,7 @@ const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
 
 /// Per-user runtime directory holding the session sockets.
 pub fn socket_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("ZEDIATOR_RUNTIME_DIR")
+    if let Ok(dir) = std::env::var("ZEDIC_RUNTIME_DIR")
         && !dir.is_empty()
     {
         return PathBuf::from(dir);
@@ -34,10 +34,10 @@ pub fn socket_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
         && !dir.is_empty()
     {
-        return PathBuf::from(dir).join("zediator");
+        return PathBuf::from(dir).join("zedic");
     }
     // macOS: $TMPDIR is per-user and mode 0700.
-    std::env::temp_dir().join("zediator-run")
+    std::env::temp_dir().join("zedic-run")
 }
 
 /// Canonicalizes a path, falling back to the input so symlink differences
@@ -103,7 +103,7 @@ impl IpcServer {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 format!(
-                    "a zediator session is already running in this project ({})",
+                    "a zedic session is already running in this project ({})",
                     cwd.display()
                 ),
             ));
@@ -168,7 +168,7 @@ impl Drop for IpcServer {
     }
 }
 
-/// Resolves the target socket for `zediator send`: an explicit `--socket`,
+/// Resolves the target socket for `zedic send`: an explicit `--socket`,
 /// otherwise this project's deterministic socket. Errors when no live session
 /// owns it.
 pub fn resolve_socket(socket: Option<PathBuf>) -> io::Result<PathBuf> {
@@ -181,8 +181,8 @@ pub fn resolve_socket(socket: Option<PathBuf>) -> io::Result<PathBuf> {
         Ok(path)
     } else {
         Err(io::Error::other(format!(
-            "no zediator session running for this project ({}); \
-             start one with `zediator run -- <cli>`",
+            "no zedic session running for this project ({}); \
+             start one with `zedic run -- <cli>`",
             cwd.display()
         )))
     }
@@ -237,7 +237,7 @@ fn read_info(info_path: &Path) -> (Option<u32>, Option<PathBuf>) {
     (pid, cwd)
 }
 
-/// Builds the message text for `zediator send`.
+/// Builds the message text for `zedic send`.
 ///
 /// The bare `file:line ` form mirrors Zed's built-in AddSelectionToThread
 /// paste; the fenced block carries the selected text when provided.
@@ -312,12 +312,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // SAFETY: guarded by ENV_LOCK; these tests run one at a time.
         unsafe {
-            std::env::set_var("ZEDIATOR_RUNTIME_DIR", dir.path());
+            std::env::set_var("ZEDIC_RUNTIME_DIR", dir.path());
             std::env::set_var("ZED_WORKTREE_ROOT", project);
         }
         let result = test();
         unsafe {
-            std::env::remove_var("ZEDIATOR_RUNTIME_DIR");
+            std::env::remove_var("ZEDIC_RUNTIME_DIR");
             std::env::remove_var("ZED_WORKTREE_ROOT");
         }
         result

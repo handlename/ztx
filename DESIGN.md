@@ -4,7 +4,7 @@ Deliberately terse; module docs in `src/` carry the details.
 
 ## Approach
 
-zediator is a **passive-tap PTY proxy**: child output is forwarded unchanged
+zedic is a **passive-tap PTY proxy**: child output is forwarded unchanged
 (the single exception is OSC 0/2 title handling), while a side channel
 observes the bytes to build state that the features read. Features never
 rewrite the live stream; interactive UI (hint mode) is drawn only on demand
@@ -18,7 +18,7 @@ Zed's native path detection already covers clicking.
 ## Structure
 
 ```
-zediator run -- <agent-cli>
+zedic run -- <agent-cli>
 ┌────────────────────────────────────────────────────────┐
 │ pty        portable-pty child; raw mode; SIGWINCH;     │
 │            signal forwarding; exit-code propagation    │
@@ -59,7 +59,7 @@ output).
   plus a panic hook; the managed title is cleared on exit.
 - **Zed config is opt-in.** `setup zed` shows the change, asks, and backs up;
   files with comments are never rewritten automatically.
-- **Logs never touch the terminal** (`ZEDIATOR_LOG` writes to a file); stray
+- **Logs never touch the terminal** (`ZEDIC_LOG` writes to a file); stray
   output would corrupt the child's screen.
 
 ## Security notes

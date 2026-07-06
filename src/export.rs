@@ -119,7 +119,7 @@ pub fn scrollback_to_markdown(shared: &Arc<Mutex<TapShared>>) -> String {
 /// returns its path. The file is intentionally not auto-deleted: the editor
 /// opens it asynchronously.
 pub fn write_export(content: &str) -> io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("zediator");
+    let dir = std::env::temp_dir().join("zedic");
     std::fs::create_dir_all(&dir)?;
     // Exports can contain conversation content; keep them owner-only.
     {
@@ -137,14 +137,14 @@ pub fn write_export(content: &str) -> io::Result<PathBuf> {
 
 /// Opens `path` in the user's editor without touching the wrapped terminal.
 ///
-/// Resolution order: `$ZEDIATOR_EDITOR`, then `zed`, then `$EDITOR`.
+/// Resolution order: `$ZEDIC_EDITOR`, then `zed`, then `$EDITOR`.
 /// GUI editors detach; terminal editors in `$EDITOR` would fight over the
 /// TTY, so output is nulled and failures only logged.
 pub fn open_in_editor(path: &Path) -> io::Result<()> {
     let editor = editor_command();
     let (program, args) = editor
         .split_first()
-        .ok_or_else(|| io::Error::other("no editor available (set ZEDIATOR_EDITOR or EDITOR)"))?;
+        .ok_or_else(|| io::Error::other("no editor available (set ZEDIC_EDITOR or EDITOR)"))?;
     std::process::Command::new(program)
         .args(args)
         .arg(path)
@@ -161,7 +161,7 @@ pub fn open_location(path: &Path, line: Option<u32>, column: Option<u32>) -> io:
     let editor = editor_command();
     let (program, args) = editor
         .split_first()
-        .ok_or_else(|| io::Error::other("no editor available (set ZEDIATOR_EDITOR or EDITOR)"))?;
+        .ok_or_else(|| io::Error::other("no editor available (set ZEDIC_EDITOR or EDITOR)"))?;
     let mut cmd = std::process::Command::new(program);
     cmd.args(args);
     let is_zed = Path::new(program)
@@ -187,7 +187,7 @@ pub fn open_location(path: &Path, line: Option<u32>, column: Option<u32>) -> io:
 }
 
 fn editor_command() -> Vec<String> {
-    if let Ok(cmd) = std::env::var("ZEDIATOR_EDITOR")
+    if let Ok(cmd) = std::env::var("ZEDIC_EDITOR")
         && !cmd.is_empty()
     {
         return cmd.split_whitespace().map(str::to_owned).collect();

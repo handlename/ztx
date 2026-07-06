@@ -382,7 +382,7 @@ pub fn pick(
     // Enter alternate screen, pause mouse reporting, hide cursor, draw.
     set_mouse_modes(stdout, mouse_modes, false)?;
     stdout.write_all(b"\x1b[?1049h\x1b[H\x1b[2J\x1b[?25l")?;
-    stdout.write_all(b"zediator \xe2\x80\x94 open file (press label, ESC to cancel)\r\n\r\n")?;
+    stdout.write_all(b"zedic \xe2\x80\x94 open file (press label, ESC to cancel)\r\n\r\n")?;
     for (i, candidate) in candidates.iter().take(visible).enumerate() {
         // `display` already carries any :line:col suffix as it appeared.
         stdout.write_all(
