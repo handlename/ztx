@@ -34,6 +34,8 @@ zedic run -- <agent-cli>
 │            `send` client; one session per project      │
 │ adapter    trait + ClaudeCode / Antigravity / fallback │
 │ setup      Zed tasks.json / keymap.json merging        │
+│ config     user config.toml: prefix key, editor,       │
+│            status emoji (CLI > config > default)       │
 └────────────────────────────────────────────────────────┘
 ```
 

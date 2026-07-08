@@ -42,9 +42,9 @@ Tip: set `agent.terminal_init_command` in Zed settings to
 
 ### Key bindings (inside a wrapped session)
 
-All zedic bindings hide behind a prefix key, `ctrl-]` by default, so the
-wrapped CLI keeps its entire keymap. Press `ctrl-]` twice to send a literal
-`ctrl-]`.
+All zedic bindings hide behind a prefix key, `ctrl-]` by default (configurable
+via config.toml), so the wrapped CLI keeps its entire keymap. Press the prefix
+twice to send a literal prefix byte.
 
 | Keys | Action |
 |------|--------|
@@ -86,11 +86,27 @@ cwd); `zedic send --socket <PATH>` targets one explicitly.
 
 ## Configuration
 
-Environment variables:
+### Configuration file
+
+An optional `~/.config/zedic/config.toml` (honoring `$XDG_CONFIG_HOME`) sets a
+few defaults. Every key is optional; the precedence is **CLI argument >
+config.toml > built-in default**. A missing, unreadable, or malformed file is
+ignored — each setting falls back to its default and startup is never blocked.
+
+```toml
+prefix = "ctrl-]"        # zedic prefix key, as a Ctrl chord (e.g. "ctrl-a")
+editor = "zed"           # editor for exports / hint "open" (split on spaces)
+
+[status_emoji]           # Claude session-title status prefixes
+busy = "🔄"
+idle = "⏳"
+```
+
+### Environment variables
 
 | Variable | Meaning |
 |----------|---------|
-| `ZEDIC_EDITOR` | Editor command used to open files/exports (default: `zed`, falling back to `$EDITOR`) |
+| `ZEDIC_EDITOR` | Editor command used to open files/exports. The config-file `editor` takes precedence; otherwise this overrides the built-in `zed` default, which falls back to `$EDITOR` |
 | `ZEDIC_LOG` | Tracing filter (e.g. `debug`); logging is off when unset |
 | `ZEDIC_LOG_FILE` | Log file path (default: `~/.local/state/zedic/zedic.log`) |
 | `ZEDIC_RUNTIME_DIR` | Socket directory override |
@@ -111,15 +127,18 @@ TUI). To investigate any misbehavior:
 
 ## Notes and limitations
 
-- Session-name quality depends on the adapter. Claude Code exposes derived
-  session names; antigravity-cli exposes conversation titles. Without an
-  adapter, the child CLI's own terminal titles pass through.
+- Session-name quality depends on the adapter. The Claude Code adapter titles
+  the session with the worktree (or branch) name, prefixed by a status emoji
+  (🔄 busy, ⏳ idle — both configurable in config.toml); antigravity-cli
+  exposes conversation titles. Without an adapter, the child CLI's own terminal
+  titles pass through.
 - Markdown export uses the CLI's native transcript when an adapter can locate
   one (Claude Code). Otherwise it falls back to the ANSI-stripped terminal
   capture, which excludes alternate-screen (full-screen TUI) content.
-- Exported Markdown files accumulate under `$TMPDIR/zedic/` (owner-only)
-  so the editor can keep them open; the OS cleans the temp directory
-  periodically, or delete them manually.
+- Exported Markdown files are written under `$TMPDIR/zedic/` (owner-only) so
+  the editor can keep them open. zedic prunes exports older than 7 days at
+  `run` startup (best-effort); the OS also cleans the temp directory
+  periodically.
 - See [DESIGN.md](DESIGN.md) for architecture, [REQUIREMENTS.md](REQUIREMENTS.md)
   for the requirements this tool answers, and [GLOSSARY.md](GLOSSARY.md) for
   terminology.

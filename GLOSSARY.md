@@ -13,7 +13,8 @@
 | **Tap** | The observer parsing child output (via VTE) into the scrollback and screen-state flags without modifying the passthrough stream. |
 | **OSC title** | The `OSC 0/2` escape sequence setting a terminal title. Zed shows it as the Terminal Thread's session name. |
 | **Title mode** | How zedic treats the child's OSC titles: `passthrough` (forward), `managed` (suppress; zedic emits adapter-driven titles), `prefix` (rewrite with a prefix). |
-| **Prefix key** | `ctrl-]` by default. All zedic key bindings live behind it so the wrapped CLI keeps its own keymap. |
+| **Prefix key** | `ctrl-]` by default (configurable in config.toml). All zedic key bindings live behind it so the wrapped CLI keeps its own keymap. |
+| **Config file** | Optional `~/.config/zedic/config.toml` setting the prefix key, editor command, and Claude status-title emoji. Precedence: CLI argument > config.toml > built-in default; a missing or malformed file falls back to defaults. |
 | **Hint mode** | `ctrl-] f`: an overlay labeling file paths found in the scrollback; typing a label opens that path in the editor (tmux-thumbs style). |
 | **Export** | Converting the session log to Markdown and opening it in the editor (`ctrl-] e` or `zedic export`). |
 | **IPC socket** | Per-wrapper Unix socket (`<pid>.sock`) accepting messages from `zedic send`, injected into the child as a bracketed paste. |
