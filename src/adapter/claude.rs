@@ -5,13 +5,15 @@
 //!
 //! ```json
 //! {"pid":10302,"sessionId":"...","cwd":"/path","startedAt":1783169354502,
-//!  "name":"dotfiles-c0","nameSource":"derived", ...}
+//!  "name":"dotfiles-c0","nameSource":"derived","status":"idle", ...}
 //! ```
 //!
-//! `name` is the auto-generated session title — exactly what feature 1 wants.
-//! Everything here is best-effort: when the registry is missing or the schema
-//! changed, the adapter returns `None` and the caller falls back to the
-//! child's own OSC titles.
+//! The terminal title is built as `{status emoji} {worktree name}`: `status`
+//! (`busy`/`idle`) selects the emoji, and the worktree name is derived from
+//! `cwd`. Claude's own `name` (a `{repo}-{random}` slug) is intentionally not
+//! used — it carries no useful information. Everything here is best-effort:
+//! when the registry is missing or the schema changed, the adapter returns
+//! `None` and the caller falls back to the child's own OSC titles.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -26,7 +28,9 @@ struct SessionMeta {
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
     cwd: Option<String>,
-    name: Option<String>,
+    /// Claude's own activity flag; observed values are `"busy"` and `"idle"`
+    /// (absent right after startup). Drives the title's status emoji.
+    status: Option<String>,
 }
 
 pub struct ClaudeCodeAdapter {
@@ -35,6 +39,9 @@ pub struct ClaudeCodeAdapter {
     child_pid: Option<u32>,
     cwd: PathBuf,
     started_at: SystemTime,
+    /// The worktree name is derived from `cwd`, which never changes for a
+    /// session, so it is computed once and reused on every poll.
+    cached_title: Option<String>,
 }
 
 impl ClaudeCodeAdapter {
@@ -63,6 +70,7 @@ impl ClaudeCodeAdapter {
             child_pid,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             started_at: SystemTime::now(),
+            cached_title: None,
         }
     }
 
@@ -101,12 +109,30 @@ impl ClaudeCodeAdapter {
         }
         cwd_match.map(|(_, meta)| meta)
     }
+
+    /// The worktree name shown as the title body, computed once from `cwd`.
+    fn worktree_title(&mut self) -> String {
+        if let Some(title) = &self.cached_title {
+            return title.clone();
+        }
+        let title = derive_title(&self.cwd);
+        self.cached_title = Some(title.clone());
+        title
+    }
 }
 
 impl Adapter for ClaudeCodeAdapter {
     fn current_activity(&mut self) -> Option<String> {
-        let name = self.find_session()?.name?;
-        if name.is_empty() { None } else { Some(name) }
+        // No matching session -> nothing better than the child's own title.
+        let meta = self.find_session()?;
+        let title = self.worktree_title();
+        if title.is_empty() {
+            return None;
+        }
+        Some(match status_emoji(meta.status.as_deref()) {
+            Some(emoji) => format!("{emoji} {title}"),
+            None => title,
+        })
     }
 
     fn transcript_path(&mut self) -> Option<PathBuf> {
@@ -134,6 +160,60 @@ fn project_slug(cwd: &Path) -> String {
         .collect()
 }
 
+/// Maps Claude's `status` field to a title prefix emoji. Unknown or absent
+/// statuses get no prefix (the bare worktree name is shown).
+fn status_emoji(status: Option<&str>) -> Option<&'static str> {
+    match status {
+        Some("busy") => Some("🔄"),
+        Some("idle") => Some("⏳"),
+        _ => None,
+    }
+}
+
+/// Derives the title body from `cwd`: the worktree name for a worktree
+/// checkout, otherwise the git branch, otherwise the directory basename.
+fn derive_title(cwd: &Path) -> String {
+    worktree_name(cwd)
+        .or_else(|| git_branch(cwd))
+        .unwrap_or_else(|| basename(cwd))
+}
+
+/// Extracts the worktree name for the layout `.../worktrees/<repo>/<name>/<repo>`:
+/// the leaf basename just repeats the repo, so the worktree name is the parent
+/// directory. Returns `None` when `cwd` is not under a `worktrees/` tree.
+fn worktree_name(cwd: &Path) -> Option<String> {
+    let under_worktrees = cwd
+        .components()
+        .any(|c| c.as_os_str() == std::ffi::OsStr::new("worktrees"));
+    if !under_worktrees {
+        return None;
+    }
+    let name = cwd.parent()?.file_name()?.to_string_lossy().into_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Current git branch of `cwd` (`None` when not a repo or on a detached HEAD).
+fn git_branch(cwd: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!branch.is_empty() && branch != "HEAD").then_some(branch)
+}
+
+/// Last path component of `cwd` as a `String` (final fallback title).
+fn basename(cwd: &Path) -> String {
+    cwd.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,35 +231,83 @@ mod tests {
         )
     }
 
+    const WORKTREE_CWD: &str = "/home/me/worktrees/nature-server/elder-reef/nature-server";
+
     #[test]
-    fn matches_session_by_child_pid() {
+    fn busy_session_matched_by_pid_shows_emoji_and_worktree() {
         let dir = tempfile::tempdir().unwrap();
         write_session(
             &dir.path().join("sessions"),
             "42.json",
-            r#"{"pid":42,"sessionId":"s-1","cwd":"/elsewhere","name":"fix login bug"}"#,
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/elsewhere","status":"busy"}"#,
         );
         let mut adapter = adapter_with(&dir, Some(42));
-        assert_eq!(adapter.current_activity().as_deref(), Some("fix login bug"));
+        adapter.cwd = PathBuf::from(WORKTREE_CWD);
+        assert_eq!(adapter.current_activity().as_deref(), Some("🔄 elder-reef"));
+    }
+
+    #[test]
+    fn idle_status_maps_to_hourglass() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(
+            &dir.path().join("sessions"),
+            "42.json",
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/elsewhere","status":"idle"}"#,
+        );
+        let mut adapter = adapter_with(&dir, Some(42));
+        adapter.cwd = PathBuf::from(WORKTREE_CWD);
+        assert_eq!(adapter.current_activity().as_deref(), Some("⏳ elder-reef"));
+    }
+
+    #[test]
+    fn missing_status_yields_bare_worktree_name() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(
+            &dir.path().join("sessions"),
+            "42.json",
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/elsewhere"}"#,
+        );
+        let mut adapter = adapter_with(&dir, Some(42));
+        adapter.cwd = PathBuf::from(WORKTREE_CWD);
+        assert_eq!(adapter.current_activity().as_deref(), Some("elder-reef"));
     }
 
     #[test]
     fn falls_back_to_cwd_match() {
         let dir = tempfile::tempdir().unwrap();
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = PathBuf::from(WORKTREE_CWD);
         write_session(
             &dir.path().join("sessions"),
             "7.json",
-            &format!(
-                r#"{{"pid":7,"sessionId":"s-2","cwd":{:?},"name":"by-cwd"}}"#,
-                cwd
-            ),
+            &format!(r#"{{"pid":7,"sessionId":"s-2","cwd":{cwd:?},"status":"busy"}}"#),
         );
         // started_at is rewound because the session file above predates the
         // adapter within this test.
         let mut adapter = adapter_with(&dir, Some(999_999));
+        adapter.cwd = cwd;
         adapter.started_at = SystemTime::UNIX_EPOCH;
-        assert_eq!(adapter.current_activity().as_deref(), Some("by-cwd"));
+        assert_eq!(adapter.current_activity().as_deref(), Some("🔄 elder-reef"));
+    }
+
+    #[test]
+    fn worktree_name_uses_parent_of_repeated_leaf() {
+        assert_eq!(
+            worktree_name(Path::new(WORKTREE_CWD)).as_deref(),
+            Some("elder-reef")
+        );
+    }
+
+    #[test]
+    fn worktree_name_is_none_outside_worktrees_tree() {
+        assert_eq!(worktree_name(Path::new("/home/me/src/agent-skills")), None);
+    }
+
+    #[test]
+    fn status_emoji_maps_known_values_only() {
+        assert_eq!(status_emoji(Some("busy")), Some("🔄"));
+        assert_eq!(status_emoji(Some("idle")), Some("⏳"));
+        assert_eq!(status_emoji(Some("something-new")), None);
+        assert_eq!(status_emoji(None), None);
     }
 
     #[test]
