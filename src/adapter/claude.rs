@@ -21,6 +21,7 @@ use std::time::SystemTime;
 use serde::Deserialize;
 
 use super::Adapter;
+use crate::config::StatusEmoji;
 
 #[derive(Debug, Deserialize)]
 struct SessionMeta {
@@ -42,28 +43,37 @@ pub struct ClaudeCodeAdapter {
     /// The worktree name is derived from `cwd`, which never changes for a
     /// session, so it is computed once and reused on every poll.
     cached_title: Option<String>,
+    /// Emoji prefixes for the `busy`/`idle` states, from user config.
+    status_emoji: StatusEmoji,
 }
 
 impl ClaudeCodeAdapter {
-    pub fn from_env(child_pid: Option<u32>) -> Self {
+    pub fn from_env(child_pid: Option<u32>, status_emoji: StatusEmoji) -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         let claude_dir = PathBuf::from(home).join(".claude");
         Self::new(
             claude_dir.join("sessions"),
             claude_dir.join("projects"),
             child_pid,
+            status_emoji,
         )
     }
 
     /// Constructor for the standalone `export` subcommand: no child process
-    /// exists, so sessions are matched purely by cwd regardless of age.
+    /// exists, so sessions are matched purely by cwd regardless of age. The
+    /// title (and thus the emoji) is never emitted here, so defaults suffice.
     pub fn for_export() -> Self {
-        let mut adapter = Self::from_env(None);
+        let mut adapter = Self::from_env(None, StatusEmoji::default());
         adapter.started_at = SystemTime::UNIX_EPOCH;
         adapter
     }
 
-    pub fn new(sessions_dir: PathBuf, projects_dir: PathBuf, child_pid: Option<u32>) -> Self {
+    pub fn new(
+        sessions_dir: PathBuf,
+        projects_dir: PathBuf,
+        child_pid: Option<u32>,
+        status_emoji: StatusEmoji,
+    ) -> Self {
         Self {
             sessions_dir,
             projects_dir,
@@ -71,7 +81,20 @@ impl ClaudeCodeAdapter {
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             started_at: SystemTime::now(),
             cached_title: None,
+            status_emoji,
         }
+    }
+
+    /// Maps Claude's `status` field to the configured title prefix emoji.
+    /// Unknown/absent statuses — and emojis configured to an empty string —
+    /// yield no prefix (the bare worktree name is shown).
+    fn status_prefix(&self, status: Option<&str>) -> Option<&str> {
+        let emoji = match status {
+            Some("busy") => self.status_emoji.busy.as_str(),
+            Some("idle") => self.status_emoji.idle.as_str(),
+            _ => return None,
+        };
+        (!emoji.is_empty()).then_some(emoji)
     }
 
     /// Finds this session's metadata. Match order (see spike results):
@@ -129,7 +152,7 @@ impl Adapter for ClaudeCodeAdapter {
         if title.is_empty() {
             return None;
         }
-        Some(match status_emoji(meta.status.as_deref()) {
+        Some(match self.status_prefix(meta.status.as_deref()) {
             Some(emoji) => format!("{emoji} {title}"),
             None => title,
         })
@@ -158,16 +181,6 @@ fn project_slug(cwd: &Path) -> String {
         .chars()
         .map(|c| if c == '/' || c == '.' { '-' } else { c })
         .collect()
-}
-
-/// Maps Claude's `status` field to a title prefix emoji. Unknown or absent
-/// statuses get no prefix (the bare worktree name is shown).
-fn status_emoji(status: Option<&str>) -> Option<&'static str> {
-    match status {
-        Some("busy") => Some("🔄"),
-        Some("idle") => Some("⏳"),
-        _ => None,
-    }
 }
 
 /// Derives the title body from `cwd`: the worktree name for a worktree
@@ -228,6 +241,7 @@ mod tests {
             dir.path().join("sessions"),
             dir.path().join("projects"),
             child_pid,
+            StatusEmoji::default(),
         )
     }
 
@@ -303,11 +317,55 @@ mod tests {
     }
 
     #[test]
-    fn status_emoji_maps_known_values_only() {
-        assert_eq!(status_emoji(Some("busy")), Some("🔄"));
-        assert_eq!(status_emoji(Some("idle")), Some("⏳"));
-        assert_eq!(status_emoji(Some("something-new")), None);
-        assert_eq!(status_emoji(None), None);
+    fn status_prefix_maps_known_values_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = adapter_with(&dir, Some(1));
+        assert_eq!(adapter.status_prefix(Some("busy")), Some("🔄"));
+        assert_eq!(adapter.status_prefix(Some("idle")), Some("⏳"));
+        assert_eq!(adapter.status_prefix(Some("something-new")), None);
+        assert_eq!(adapter.status_prefix(None), None);
+    }
+
+    #[test]
+    fn configured_emoji_overrides_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(
+            &dir.path().join("sessions"),
+            "42.json",
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/elsewhere","status":"busy"}"#,
+        );
+        let mut adapter = ClaudeCodeAdapter::new(
+            dir.path().join("sessions"),
+            dir.path().join("projects"),
+            Some(42),
+            StatusEmoji {
+                busy: "🚀".into(),
+                idle: "💤".into(),
+            },
+        );
+        adapter.cwd = PathBuf::from(WORKTREE_CWD);
+        assert_eq!(adapter.current_activity().as_deref(), Some("🚀 elder-reef"));
+    }
+
+    #[test]
+    fn empty_configured_emoji_yields_bare_title() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(
+            &dir.path().join("sessions"),
+            "42.json",
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/elsewhere","status":"busy"}"#,
+        );
+        let mut adapter = ClaudeCodeAdapter::new(
+            dir.path().join("sessions"),
+            dir.path().join("projects"),
+            Some(42),
+            StatusEmoji {
+                busy: String::new(),
+                idle: String::new(),
+            },
+        );
+        adapter.cwd = PathBuf::from(WORKTREE_CWD);
+        assert_eq!(adapter.current_activity().as_deref(), Some("elder-reef"));
     }
 
     #[test]

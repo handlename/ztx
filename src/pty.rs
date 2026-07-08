@@ -25,6 +25,12 @@ pub struct RunOptions {
     pub title_mode: Option<TitleMode>,
     pub title_prefix: Option<String>,
     pub adapter: AdapterKind,
+    /// zedic prefix key byte (from config, or `input::DEFAULT_PREFIX`).
+    pub prefix: u8,
+    /// Editor command line from config; `None` uses env/`zed`/`$EDITOR`.
+    pub editor: Option<String>,
+    /// Status-emoji prefixes for the managed title (from config).
+    pub status_emoji: crate::config::StatusEmoji,
 }
 
 /// Runs `command` inside a PTY, passing terminal I/O through (unchanged
@@ -81,6 +87,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         opts.adapter,
         command,
         child_pid,
+        opts.status_emoji,
     )));
     let has_adapter = adapter.lock().expect("adapter lock poisoned").is_some();
     let title_mode = opts.title_mode.unwrap_or(if has_adapter {
@@ -143,12 +150,13 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let tap_for_input = tap_shared.clone();
     let gate_for_input = stdout_gate.clone();
     let child_input = child_writer.clone();
+    let prefix = opts.prefix;
+    let editor_for_input = opts.editor.clone();
     thread::spawn(move || {
         let mut stdin = io::stdin().lock();
         let mut buf = [0u8; IO_BUF_SIZE];
         tracing::debug!(interactive = input_is_tty, "stdin pump started");
-        let mut filter =
-            input_is_tty.then(|| crate::input::InputFilter::new(crate::input::DEFAULT_PREFIX));
+        let mut filter = input_is_tty.then(|| crate::input::InputFilter::new(prefix));
         let mut forwarded = Vec::with_capacity(IO_BUF_SIZE);
         loop {
             match stdin.read(&mut buf) {
@@ -176,6 +184,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                             &tap_for_input,
                             &gate_for_input,
                             &mut stdin,
+                            editor_for_input.as_deref(),
                         );
                     }
                 }
@@ -310,6 +319,7 @@ fn handle_action(
     tap: &Arc<Mutex<TapShared>>,
     gate: &Arc<Mutex<()>>,
     stdin: &mut impl crate::hint::HintInput,
+    config_editor: Option<&str>,
 ) {
     tracing::debug!(?action, "prefix action triggered");
     match action {
@@ -321,8 +331,9 @@ fn handle_action(
                 .and_then(|a| a.transcript_path())
                 .and_then(|path| crate::export::transcript_to_markdown(&path).ok())
                 .unwrap_or_else(|| crate::export::scrollback_to_markdown(tap));
-            let result = crate::export::write_export(&markdown)
-                .and_then(|path| crate::export::open_in_editor(&path).map(|()| path));
+            let result = crate::export::write_export(&markdown).and_then(|path| {
+                crate::export::open_in_editor(&path, config_editor).map(|()| path)
+            });
             match result {
                 Ok(path) => tracing::info!(path = %path.display(), "exported session log"),
                 Err(err) => tracing::warn!(error = %err, "session export failed"),
@@ -369,7 +380,7 @@ fn handle_action(
                         &alt_rows,
                         &mouse_modes,
                     ) {
-                        Ok(Some(index)) => open_candidate(&hints[index].candidate),
+                        Ok(Some(index)) => open_candidate(&hints[index].candidate, config_editor),
                         Ok(None) => tracing::debug!("hint mode cancelled"),
                         Err(err) => tracing::warn!(error = %err, "hint mode failed"),
                     }
@@ -405,7 +416,7 @@ fn handle_action(
             let _gate = gate.lock().expect("stdout gate poisoned");
             let mut stdout = io::stdout();
             match crate::hint::pick(stdin, &mut stdout, &candidates, &mouse_modes) {
-                Ok(Some(index)) => open_candidate(&candidates[index]),
+                Ok(Some(index)) => open_candidate(&candidates[index], config_editor),
                 Ok(None) => tracing::debug!("hint mode cancelled"),
                 Err(err) => tracing::warn!(error = %err, "hint mode failed"),
             }
@@ -413,8 +424,8 @@ fn handle_action(
     }
 }
 
-fn open_candidate(chosen: &crate::hint::Candidate) {
-    match crate::export::open_location(&chosen.path, chosen.line, chosen.column) {
+fn open_candidate(chosen: &crate::hint::Candidate, config_editor: Option<&str>) {
+    match crate::export::open_location(&chosen.path, chosen.line, chosen.column, config_editor) {
         Ok(()) => tracing::info!(
             path = %chosen.path.display(),
             line = ?chosen.line,

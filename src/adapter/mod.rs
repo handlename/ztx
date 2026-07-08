@@ -44,14 +44,15 @@ pub fn resolve(
     kind: AdapterKind,
     command: &[String],
     child_pid: Option<u32>,
+    status_emoji: crate::config::StatusEmoji,
 ) -> Option<Box<dyn Adapter>> {
     let program = command.first().map(|c| basename(c))?;
     match kind {
         AdapterKind::None => None,
-        AdapterKind::Claude => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid))),
+        AdapterKind::Claude => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid, status_emoji))),
         AdapterKind::Antigravity => Some(Box::new(AntigravityAdapter::from_env())),
         AdapterKind::Auto => match program {
-            "claude" => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid))),
+            "claude" => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid, status_emoji))),
             "agy" | "antigravity" => Some(Box::new(AntigravityAdapter::from_env())),
             _ => None,
         },

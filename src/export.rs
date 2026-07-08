@@ -137,11 +137,11 @@ pub fn write_export(content: &str) -> io::Result<PathBuf> {
 
 /// Opens `path` in the user's editor without touching the wrapped terminal.
 ///
-/// Resolution order: `$ZEDIC_EDITOR`, then `zed`, then `$EDITOR`.
-/// GUI editors detach; terminal editors in `$EDITOR` would fight over the
-/// TTY, so output is nulled and failures only logged.
-pub fn open_in_editor(path: &Path) -> io::Result<()> {
-    let editor = editor_command();
+/// Resolution order: `config.toml` `editor`, then `$ZEDIC_EDITOR`, then `zed`,
+/// then `$EDITOR`. GUI editors detach; terminal editors in `$EDITOR` would
+/// fight over the TTY, so output is nulled and failures only logged.
+pub fn open_in_editor(path: &Path, config_editor: Option<&str>) -> io::Result<()> {
+    let editor = editor_command(config_editor);
     let (program, args) = editor
         .split_first()
         .ok_or_else(|| io::Error::other("no editor available (set ZEDIC_EDITOR or EDITOR)"))?;
@@ -157,8 +157,13 @@ pub fn open_in_editor(path: &Path) -> io::Result<()> {
 
 /// Opens a specific location in the editor. Zed understands the
 /// `path:line:column` form; other editors receive the bare path.
-pub fn open_location(path: &Path, line: Option<u32>, column: Option<u32>) -> io::Result<()> {
-    let editor = editor_command();
+pub fn open_location(
+    path: &Path,
+    line: Option<u32>,
+    column: Option<u32>,
+    config_editor: Option<&str>,
+) -> io::Result<()> {
+    let editor = editor_command(config_editor);
     let (program, args) = editor
         .split_first()
         .ok_or_else(|| io::Error::other("no editor available (set ZEDIC_EDITOR or EDITOR)"))?;
@@ -186,7 +191,11 @@ pub fn open_location(path: &Path, line: Option<u32>, column: Option<u32>) -> io:
     Ok(())
 }
 
-fn editor_command() -> Vec<String> {
+fn editor_command(config_editor: Option<&str>) -> Vec<String> {
+    // config.toml wins: it is the user's persistent, explicit preference.
+    if let Some(cmd) = config_editor.map(str::trim).filter(|c| !c.is_empty()) {
+        return cmd.split_whitespace().map(str::to_owned).collect();
+    }
     if let Ok(cmd) = std::env::var("ZEDIC_EDITOR")
         && !cmd.is_empty()
     {
@@ -252,6 +261,20 @@ mod tests {
         assert!(md.contains("*(tool result)*"));
         assert!(md.contains("and my question"));
         assert!(!md.contains("huge"));
+    }
+
+    #[test]
+    fn config_editor_takes_precedence_and_splits_args() {
+        assert_eq!(
+            editor_command(Some("my-editor --wait")),
+            vec!["my-editor".to_owned(), "--wait".to_owned()]
+        );
+    }
+
+    #[test]
+    fn blank_config_editor_falls_through() {
+        // A blank config editor must not shadow the env/default chain.
+        assert_ne!(editor_command(Some("   ")), vec!["".to_owned()]);
     }
 
     #[test]

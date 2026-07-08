@@ -1,5 +1,6 @@
 mod adapter;
 mod cli;
+mod config;
 mod debug;
 mod export;
 mod hint;
@@ -21,6 +22,7 @@ fn main() -> ExitCode {
     term_guard::install_panic_hook();
 
     let args = cli::Cli::parse();
+    let config = config::Config::load();
     match args.command {
         cli::Command::Run {
             title_mode,
@@ -32,6 +34,9 @@ fn main() -> ExitCode {
                 title_mode,
                 title_prefix,
                 adapter,
+                prefix: config.prefix.unwrap_or(input::DEFAULT_PREFIX),
+                editor: config.editor,
+                status_emoji: config.status_emoji,
             };
             match pty::run(&command, opts) {
                 Ok(code) => ExitCode::from(code.min(u8::MAX as u32) as u8),
@@ -41,7 +46,9 @@ fn main() -> ExitCode {
                 }
             }
         }
-        cli::Command::Export { adapter, stdout } => report(run_export(adapter, stdout)),
+        cli::Command::Export { adapter, stdout } => {
+            report(run_export(adapter, stdout, config.editor.as_deref()))
+        }
         cli::Command::Send {
             from_zed_env,
             file,
@@ -118,7 +125,11 @@ fn run_sessions() -> std::io::Result<()> {
     Ok(())
 }
 
-fn run_export(kind: adapter::AdapterKind, to_stdout: bool) -> std::io::Result<()> {
+fn run_export(
+    kind: adapter::AdapterKind,
+    to_stdout: bool,
+    config_editor: Option<&str>,
+) -> std::io::Result<()> {
     let mut resolved = adapter::resolve_for_export(kind).ok_or_else(|| {
         std::io::Error::other(
             "export outside a wrapper needs an adapter; \
@@ -134,7 +145,7 @@ fn run_export(kind: adapter::AdapterKind, to_stdout: bool) -> std::io::Result<()
         return Ok(());
     }
     let path = export::write_export(&markdown)?;
-    export::open_in_editor(&path)?;
+    export::open_in_editor(&path, config_editor)?;
     eprintln!("exported to {}", path.display());
     Ok(())
 }
