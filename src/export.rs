@@ -10,10 +10,15 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
 use crate::term::TapShared;
+
+/// Exports older than this are pruned on `run` startup (see the note on
+/// `write_export`: files are intentionally left behind for the async editor).
+const EXPORT_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Converts a Claude Code session transcript (JSONL) into Markdown.
 ///
@@ -115,11 +120,16 @@ pub fn scrollback_to_markdown(shared: &Arc<Mutex<TapShared>>) -> String {
     out
 }
 
+/// The directory holding session exports, shared by the writer and the pruner.
+fn export_dir() -> PathBuf {
+    std::env::temp_dir().join("zedic")
+}
+
 /// Writes `content` to a timestamped Markdown file in the temp directory and
 /// returns its path. The file is intentionally not auto-deleted: the editor
 /// opens it asynchronously.
 pub fn write_export(content: &str) -> io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("zedic");
+    let dir = export_dir();
     std::fs::create_dir_all(&dir)?;
     // Exports can contain conversation content; keep them owner-only.
     {
@@ -133,6 +143,54 @@ pub fn write_export(content: &str) -> io::Result<PathBuf> {
         .tempfile_in(&dir)?;
     file.write_all(content.as_bytes())?;
     Ok(file.path().to_path_buf())
+}
+
+/// Best-effort prune of exports older than `EXPORT_MAX_AGE` from the temp
+/// directory. Called at `run` startup; every error is swallowed so cleanup
+/// can never delay or abort launching the wrapped CLI.
+pub fn cleanup_old_exports() {
+    let dir = export_dir();
+    for path in stale_exports(&dir, SystemTime::now(), EXPORT_MAX_AGE) {
+        match std::fs::remove_file(&path) {
+            Ok(()) => tracing::debug!(path = %path.display(), "pruned stale export"),
+            Err(err) => {
+                tracing::debug!(path = %path.display(), error = %err, "failed to prune export")
+            }
+        }
+    }
+}
+
+/// Selects `session-*.md` files in `dir` whose mtime is older than `max_age`
+/// relative to `now`. Deletes nothing — factored out so the mtime-based
+/// selection can be unit-tested independently of the removal side effect.
+fn stale_exports(dir: &Path, now: SystemTime, max_age: Duration) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut stale = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_export_file(&path) {
+            continue;
+        }
+        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if now
+            .duration_since(mtime)
+            .is_ok_and(|age| age > max_age)
+        {
+            stale.push(path);
+        }
+    }
+    stale
+}
+
+/// True for the `session-*.md` names produced by `write_export`.
+fn is_export_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|name| name.starts_with("session-") && name.ends_with(".md"))
 }
 
 /// Opens `path` in the user's editor without touching the wrapped terminal.
@@ -283,6 +341,65 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# hello\n");
         assert_eq!(path.extension().unwrap(), "md");
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn stale_exports_selects_only_old_session_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let max_age = Duration::from_secs(7 * 24 * 60 * 60);
+        let day = Duration::from_secs(24 * 60 * 60);
+
+        // Old export -> pruned.
+        let old = dir.path().join("session-old.md");
+        std::fs::File::create(&old)
+            .unwrap()
+            .set_modified(now - 8 * day)
+            .unwrap();
+        // Recent export -> kept (created now).
+        std::fs::File::create(dir.path().join("session-new.md")).unwrap();
+        // Old but not an export file -> ignored.
+        std::fs::File::create(dir.path().join("notes-old.txt"))
+            .unwrap()
+            .set_modified(now - 30 * day)
+            .unwrap();
+
+        assert_eq!(stale_exports(dir.path(), now, max_age), vec![old]);
+    }
+
+    #[test]
+    fn stale_exports_keeps_future_mtime_files() {
+        // Clock skew can stamp a file in the future; duration_since then errs,
+        // and such files must be kept rather than pruned.
+        let dir = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let day = Duration::from_secs(24 * 60 * 60);
+        std::fs::File::create(dir.path().join("session-future.md"))
+            .unwrap()
+            .set_modified(now + day)
+            .unwrap();
+        assert!(
+            stale_exports(dir.path(), now, Duration::from_secs(1)).is_empty()
+        );
+    }
+
+    #[test]
+    fn stale_exports_missing_dir_is_empty() {
+        assert!(
+            stale_exports(
+                Path::new("/no/such/zedic/dir"),
+                SystemTime::now(),
+                Duration::from_secs(1)
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn is_export_file_matches_session_markdown_only() {
+        assert!(is_export_file(Path::new("/t/session-abc.md")));
+        assert!(!is_export_file(Path::new("/t/session-abc.txt")));
+        assert!(!is_export_file(Path::new("/t/other.md")));
     }
 
     #[test]

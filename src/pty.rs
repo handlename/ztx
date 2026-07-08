@@ -41,6 +41,9 @@ pub struct RunOptions {
 /// every key chord, including sequences like Shift+Enter encoded via the kitty
 /// keyboard protocol, reaches the child as-is.
 pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
+    // Prune stale exports left in the temp dir; best-effort, never fatal.
+    crate::export::cleanup_old_exports();
+
     // Claim this project's IPC socket before spawning the child, so a second
     // session in the same project is refused instead of launching the agent
     // CLI and then failing. A non-collision bind error (e.g. an unwritable
