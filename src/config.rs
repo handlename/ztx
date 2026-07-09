@@ -13,6 +13,7 @@
 //! [status_emoji]          # Claude session-title status prefixes
 //! busy = "🔄"
 //! idle = "⏳"
+//! waiting = "🔔"          # Claude is waiting for user input (choices, prompts)
 //! ```
 
 use std::path::PathBuf;
@@ -23,6 +24,8 @@ use serde::Deserialize;
 const DEFAULT_BUSY_EMOJI: &str = "🔄";
 /// Default Claude "idle" status emoji (mirrors `adapter::claude`).
 const DEFAULT_IDLE_EMOJI: &str = "⏳";
+/// Default Claude "waiting" status emoji (mirrors `adapter::claude`).
+const DEFAULT_WAITING_EMOJI: &str = "🔔";
 
 /// Resolved zedic configuration. Fields that map to a CLI-overridable setting
 /// are `Option`: `None` means "no preference, use the built-in default".
@@ -36,13 +39,14 @@ pub struct Config {
     pub status_emoji: StatusEmoji,
 }
 
-/// The busy/idle emoji prefixes used by the Claude adapter's title. Defaults
-/// match the adapter's built-in emoji so an absent `[status_emoji]` section is
-/// indistinguishable from omitting the file.
+/// The busy/idle/waiting emoji prefixes used by the Claude adapter's title.
+/// Defaults match the adapter's built-in emoji so an absent `[status_emoji]`
+/// section is indistinguishable from omitting the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusEmoji {
     pub busy: String,
     pub idle: String,
+    pub waiting: String,
 }
 
 impl Default for StatusEmoji {
@@ -50,6 +54,7 @@ impl Default for StatusEmoji {
         Self {
             busy: DEFAULT_BUSY_EMOJI.to_owned(),
             idle: DEFAULT_IDLE_EMOJI.to_owned(),
+            waiting: DEFAULT_WAITING_EMOJI.to_owned(),
         }
     }
 }
@@ -103,6 +108,9 @@ impl Config {
             if let Some(idle) = raw_emoji.idle {
                 status_emoji.idle = idle;
             }
+            if let Some(waiting) = raw_emoji.waiting {
+                status_emoji.waiting = waiting;
+            }
         }
 
         Self {
@@ -125,6 +133,7 @@ struct RawConfig {
 struct RawStatusEmoji {
     busy: Option<String>,
     idle: Option<String>,
+    waiting: Option<String>,
 }
 
 /// Parses a prefix-key spec into its control byte. Only the `ctrl-<key>` form
@@ -183,12 +192,14 @@ mod tests {
             [status_emoji]
             busy = "B"
             idle = "I"
+            waiting = "W"
             "#,
         );
         assert_eq!(cfg.prefix, Some(0x01));
         assert_eq!(cfg.editor.as_deref(), Some("zed --wait"));
         assert_eq!(cfg.status_emoji.busy, "B");
         assert_eq!(cfg.status_emoji.idle, "I");
+        assert_eq!(cfg.status_emoji.waiting, "W");
     }
 
     #[test]
@@ -196,6 +207,7 @@ mod tests {
         let cfg = Config::parse("[status_emoji]\nbusy = \"X\"\n");
         assert_eq!(cfg.status_emoji.busy, "X");
         assert_eq!(cfg.status_emoji.idle, DEFAULT_IDLE_EMOJI);
+        assert_eq!(cfg.status_emoji.waiting, DEFAULT_WAITING_EMOJI);
     }
 
     #[test]

@@ -9,7 +9,7 @@
 //! ```
 //!
 //! The terminal title is built as `{status emoji} {worktree name}`: `status`
-//! (`busy`/`idle`) selects the emoji, and the worktree name is derived from
+//! (`busy`/`idle`/`waiting`) selects the emoji, and the worktree name is derived from
 //! `cwd`. Claude's own `name` (a `{repo}-{random}` slug) is intentionally not
 //! used — it carries no useful information. Everything here is best-effort:
 //! when the registry is missing or the schema changed, the adapter returns
@@ -29,8 +29,10 @@ struct SessionMeta {
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
     cwd: Option<String>,
-    /// Claude's own activity flag; observed values are `"busy"` and `"idle"`
-    /// (absent right after startup). Drives the title's status emoji.
+    /// Claude's own activity flag; observed values are `"busy"`, `"idle"`, and
+    /// `"waiting"` (the last set while Claude blocks on user input such as a
+    /// choice menu or permission prompt; absent right after startup). Drives
+    /// the title's status emoji.
     status: Option<String>,
 }
 
@@ -92,6 +94,7 @@ impl ClaudeCodeAdapter {
         let emoji = match status {
             Some("busy") => self.status_emoji.busy.as_str(),
             Some("idle") => self.status_emoji.idle.as_str(),
+            Some("waiting") => self.status_emoji.waiting.as_str(),
             _ => return None,
         };
         (!emoji.is_empty()).then_some(emoji)
@@ -274,6 +277,19 @@ mod tests {
     }
 
     #[test]
+    fn waiting_status_maps_to_bell() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(
+            &dir.path().join("sessions"),
+            "42.json",
+            r#"{"pid":42,"sessionId":"s-1","cwd":"/elsewhere","status":"waiting","waitingFor":"permission prompt"}"#,
+        );
+        let mut adapter = adapter_with(&dir, Some(42));
+        adapter.cwd = PathBuf::from(WORKTREE_CWD);
+        assert_eq!(adapter.current_activity().as_deref(), Some("🔔 elder-reef"));
+    }
+
+    #[test]
     fn missing_status_yields_bare_worktree_name() {
         let dir = tempfile::tempdir().unwrap();
         write_session(
@@ -322,6 +338,7 @@ mod tests {
         let adapter = adapter_with(&dir, Some(1));
         assert_eq!(adapter.status_prefix(Some("busy")), Some("🔄"));
         assert_eq!(adapter.status_prefix(Some("idle")), Some("⏳"));
+        assert_eq!(adapter.status_prefix(Some("waiting")), Some("🔔"));
         assert_eq!(adapter.status_prefix(Some("something-new")), None);
         assert_eq!(adapter.status_prefix(None), None);
     }
@@ -341,6 +358,7 @@ mod tests {
             StatusEmoji {
                 busy: "🚀".into(),
                 idle: "💤".into(),
+                waiting: "🙋".into(),
             },
         );
         adapter.cwd = PathBuf::from(WORKTREE_CWD);
@@ -362,6 +380,7 @@ mod tests {
             StatusEmoji {
                 busy: String::new(),
                 idle: String::new(),
+                waiting: String::new(),
             },
         );
         adapter.cwd = PathBuf::from(WORKTREE_CWD);

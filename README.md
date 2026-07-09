@@ -100,6 +100,7 @@ editor = "zed"           # editor for exports / hint "open" (split on spaces)
 [status_emoji]           # Claude session-title status prefixes
 busy = "🔄"
 idle = "⏳"
+waiting = "🔔"           # Claude is waiting for user input (choices, prompts)
 ```
 
 ### Environment variables
@@ -129,7 +130,7 @@ TUI). To investigate any misbehavior:
 
 - Session-name quality depends on the adapter. The Claude Code adapter titles
   the session with the worktree (or branch) name, prefixed by a status emoji
-  (🔄 busy, ⏳ idle — both configurable in config.toml); antigravity-cli
+  (🔄 busy, ⏳ idle, 🔔 waiting for input — all configurable in config.toml); antigravity-cli
   exposes conversation titles. Without an adapter, the child CLI's own terminal
   titles pass through.
 - Markdown export uses the CLI's native transcript when an adapter can locate
