@@ -1,9 +1,11 @@
 use std::io::{self, IsTerminal, Read, Write};
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+use crate::ipc::TitleSignal;
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGTERM, SIGWINCH};
@@ -15,11 +17,10 @@ use crate::title::{TitleFilter, TitleMode};
 
 const IO_BUF_SIZE: usize = 8192;
 
-/// Interval between adapter polls while the child is running.
+/// Reconcile interval between adapter polls: the managed-title thread also
+/// re-polls immediately whenever a plugin hook wakes it, so this is the upper
+/// bound on staleness, not the common-case latency.
 const TITLE_POLL_INTERVAL: Duration = Duration::from_secs(2);
-
-/// Granularity of the title thread's shutdown checks.
-const TITLE_TICK: Duration = Duration::from_millis(250);
 
 pub struct RunOptions {
     pub title_mode: Option<TitleMode>,
@@ -141,9 +142,25 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         }
     });
 
+    // Shared state fed by the IPC control frames the Claude Code plugin sends:
+    // `title_tx` wakes the managed-title thread for an immediate re-poll, and
+    // `transcript_store` holds the hook-supplied transcript path preferred by
+    // export. Both exist regardless of adapter/title mode; when nothing
+    // consumes them the sends and reads are simply inert.
+    let (title_tx, title_rx) = mpsc::channel::<TitleSignal>();
+    let transcript_store: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+
     // Start serving `zedic send` on the socket claimed above (if any).
     // Kept alive for the session; dropped on exit to clean up the socket.
-    let _ipc = bound.map(|b| b.serve(child_writer.clone()));
+    let _ipc = bound.map(|b| {
+        b.serve(
+            child_writer.clone(),
+            crate::ipc::ControlChannels {
+                wake: title_tx.clone(),
+                transcript: transcript_store.clone(),
+            },
+        )
+    });
 
     // stdin -> child, with zedic's prefix-key bindings peeled off when the
     // input is interactive. Left detached: reads from stdin cannot be
@@ -153,6 +170,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let tap_for_input = tap_shared.clone();
     let gate_for_input = stdout_gate.clone();
     let child_input = child_writer.clone();
+    let transcript_for_input = transcript_store.clone();
     let prefix = opts.prefix;
     let editor_for_input = opts.editor.clone();
     thread::spawn(move || {
@@ -186,6 +204,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                             &adapter_for_input,
                             &tap_for_input,
                             &gate_for_input,
+                            &transcript_for_input,
                             &mut stdin,
                             editor_for_input.as_deref(),
                         );
@@ -245,12 +264,12 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         tap.flush();
     });
 
-    // Managed mode: a low-frequency thread polls the adapter for the current
-    // activity and re-emits it as the terminal title. Falls back to the
-    // child's own (suppressed) title when the adapter has nothing.
-    let title_stop = Arc::new(AtomicBool::new(false));
+    // Managed mode: a thread polls the adapter for the current activity and
+    // re-emits it as the terminal title. It re-polls every TITLE_POLL_INTERVAL
+    // or immediately when a plugin hook sends a wake over IPC, collapsing the
+    // status latency to ~0 on hook events. Falls back to the child's own
+    // (suppressed) title when the adapter has nothing.
     let title_thread = (title_mode == TitleMode::Managed).then(|| {
-        let stop = title_stop.clone();
         let gate = stdout_gate.clone();
         let tap = tap_shared.clone();
         let adapter = adapter.clone();
@@ -272,15 +291,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
             };
             emit(&initial, &mut current);
 
-            let ticks_per_poll =
-                (TITLE_POLL_INTERVAL.as_millis() / TITLE_TICK.as_millis()).max(1) as u64;
-            let mut tick: u64 = 0;
-            while !stop.load(Ordering::Relaxed) {
-                thread::sleep(TITLE_TICK);
-                tick += 1;
-                if !tick.is_multiple_of(ticks_per_poll) {
-                    continue;
-                }
+            loop {
                 let title = adapter
                     .lock()
                     .expect("adapter lock poisoned")
@@ -289,6 +300,12 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                     .or_else(|| tap.lock().expect("tap lock poisoned").last_title.clone());
                 if let Some(title) = title {
                     emit(&title, &mut current);
+                }
+                match title_rx.recv_timeout(TITLE_POLL_INTERVAL) {
+                    // Woken by a hook, or the regular reconcile interval elapsed.
+                    Ok(TitleSignal::Wake) | Err(RecvTimeoutError::Timeout) => {}
+                    // Shutdown requested, or the wrapper dropped every sender.
+                    Ok(TitleSignal::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                 }
             }
             // Clear the title on exit so a stale activity name does not stick
@@ -300,7 +317,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
 
     let status = child.wait().map_err(io::Error::other)?;
     let _ = output_thread.join();
-    title_stop.store(true, Ordering::Relaxed);
+    let _ = title_tx.send(TitleSignal::Stop);
     if let Some(handle) = title_thread {
         let _ = handle.join();
     }
@@ -321,17 +338,29 @@ fn handle_action(
     adapter: &SharedAdapter,
     tap: &Arc<Mutex<TapShared>>,
     gate: &Arc<Mutex<()>>,
+    transcript: &Arc<Mutex<Option<PathBuf>>>,
     stdin: &mut impl crate::hint::HintInput,
     config_editor: Option<&str>,
 ) {
     tracing::debug!(?action, "prefix action triggered");
     match action {
         crate::input::InputAction::Export => {
-            let markdown = adapter
+            // Prefer the transcript path a plugin hook reported (authoritative),
+            // then the adapter's best-effort derivation, then the PTY-capture
+            // scrollback.
+            let hook_path = transcript
                 .lock()
-                .expect("adapter lock poisoned")
-                .as_mut()
-                .and_then(|a| a.transcript_path())
+                .expect("transcript lock poisoned")
+                .clone()
+                .and_then(|p| trusted_transcript(&p));
+            let markdown = hook_path
+                .or_else(|| {
+                    adapter
+                        .lock()
+                        .expect("adapter lock poisoned")
+                        .as_mut()
+                        .and_then(|a| a.transcript_path())
+                })
                 .and_then(|path| crate::export::transcript_to_markdown(&path).ok())
                 .unwrap_or_else(|| crate::export::scrollback_to_markdown(tap));
             let result = crate::export::write_export(&markdown).and_then(|path| {
@@ -427,6 +456,17 @@ fn handle_action(
     }
 }
 
+/// Validates a hook-supplied transcript path before trusting it for export: it
+/// must resolve to a regular file under `~/.claude/projects/`. This keeps a
+/// (same-user) writer on the IPC socket from steering export at an arbitrary
+/// file. Returns the canonical path on success.
+fn trusted_transcript(raw: &Path) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let projects = std::fs::canonicalize(Path::new(&home).join(".claude/projects")).ok()?;
+    let path = std::fs::canonicalize(raw).ok()?;
+    (path.starts_with(&projects) && path.is_file()).then_some(path)
+}
+
 fn open_candidate(chosen: &crate::hint::Candidate, config_editor: Option<&str>) {
     match crate::export::open_location(&chosen.path, chosen.line, chosen.column, config_editor) {
         Ok(()) => tracing::info!(
@@ -459,5 +499,77 @@ fn current_size() -> PtySize {
         cols,
         pixel_width: 0,
         pixel_height: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs `test` with `HOME` set to `home`, serialized because it mutates a
+    /// process-wide environment variable.
+    fn with_home<T>(home: &Path, test: impl FnOnce() -> T) -> T {
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var_os("HOME");
+        // SAFETY: guarded by ENV_LOCK; these tests run one at a time.
+        unsafe { std::env::set_var("HOME", home) };
+        let result = test();
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn trusted_transcript_accepts_file_under_claude_projects() {
+        let home = tempfile::tempdir().unwrap();
+        let projects = home.path().join(".claude/projects/slug");
+        std::fs::create_dir_all(&projects).unwrap();
+        let file = projects.join("session.jsonl");
+        std::fs::write(&file, "{}").unwrap();
+        with_home(home.path(), || {
+            assert_eq!(
+                trusted_transcript(&file),
+                Some(std::fs::canonicalize(&file).unwrap())
+            );
+        });
+    }
+
+    #[test]
+    fn trusted_transcript_rejects_path_outside_projects() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".claude/projects")).unwrap();
+        // A real file, but outside ~/.claude/projects/.
+        let outside = home.path().join("evil.jsonl");
+        std::fs::write(&outside, "{}").unwrap();
+        with_home(home.path(), || {
+            assert_eq!(trusted_transcript(&outside), None);
+        });
+    }
+
+    #[test]
+    fn trusted_transcript_rejects_when_projects_dir_missing() {
+        // No ~/.claude/projects: canonicalizing the base fails, so nothing is
+        // trusted (also covers an effectively-unset HOME pointing nowhere).
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join("x.jsonl");
+        std::fs::write(&file, "{}").unwrap();
+        with_home(home.path(), || {
+            assert_eq!(trusted_transcript(&file), None);
+        });
+    }
+
+    #[test]
+    fn trusted_transcript_rejects_missing_file() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".claude/projects")).unwrap();
+        let missing = home.path().join(".claude/projects/nope.jsonl");
+        with_home(home.path(), || {
+            assert_eq!(trusted_transcript(&missing), None);
+        });
     }
 }

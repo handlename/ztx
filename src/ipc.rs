@@ -13,8 +13,11 @@ use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+use serde::{Deserialize, Serialize};
 
 /// Shared handle to the child's PTY writer, used by both the stdin pump and
 /// the IPC accept loop.
@@ -23,6 +26,66 @@ pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 /// Upper bound for one IPC message; protects the wrapper (and the session it
 /// hosts) from a runaway or malicious client exhausting memory.
 const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
+
+/// Marks an IPC message as a control frame rather than text to paste. A normal
+/// `send` payload is a file reference or selected text, which never begins with
+/// NUL, so the two are unambiguous on the wire and `send` stays unchanged.
+const CONTROL_PREFIX: u8 = 0x00;
+
+/// A control message from `zedic notify` (emitted by the Claude Code plugin
+/// hooks). Carried over the same per-project socket as `send`, distinguished
+/// by the [`CONTROL_PREFIX`] byte.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Control {
+    /// Force an immediate adapter re-poll (the session's status may have just
+    /// changed); collapses the managed title's latency to ~0 on hook events.
+    Wake,
+    /// Record the authoritative transcript path so `export` need not guess it.
+    Transcript { path: PathBuf },
+}
+
+/// Signal to the managed-title thread: re-poll now, or shut down.
+pub enum TitleSignal {
+    Wake,
+    Stop,
+}
+
+/// Endpoints the IPC control handler writes to when a control frame arrives.
+pub struct ControlChannels {
+    /// Wakes the managed-title thread for an immediate re-poll.
+    pub wake: Sender<TitleSignal>,
+    /// Latest hook-supplied transcript path (preferred by `export`).
+    pub transcript: Arc<Mutex<Option<PathBuf>>>,
+}
+
+/// Serializes `control` as an on-wire control frame (NUL prefix + JSON body).
+/// Errors when the control cannot be serialized (e.g. a non-UTF-8 transcript
+/// path) so the caller can react rather than send a bodyless frame the server
+/// would discard.
+pub fn encode_control(control: &Control) -> serde_json::Result<Vec<u8>> {
+    let mut buf = vec![CONTROL_PREFIX];
+    buf.extend_from_slice(&serde_json::to_vec(control)?);
+    Ok(buf)
+}
+
+/// Handles a received control frame (the bytes after [`CONTROL_PREFIX`]).
+/// Any valid control also wakes the title thread so a status change taking
+/// effect alongside a transcript update is reflected immediately.
+fn dispatch_control(payload: &[u8], control: &ControlChannels) {
+    match serde_json::from_slice::<Control>(payload) {
+        Ok(Control::Wake) => {}
+        Ok(Control::Transcript { path }) => {
+            *control.transcript.lock().expect("transcript lock poisoned") = Some(path);
+            tracing::info!("recorded transcript path from hook");
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "ignoring malformed control frame");
+            return;
+        }
+    }
+    let _ = control.wake.send(TitleSignal::Wake);
+}
 
 /// Per-user runtime directory holding the session sockets.
 pub fn socket_dir() -> PathBuf {
@@ -126,9 +189,10 @@ impl IpcServer {
 }
 
 impl BoundSocket {
-    /// Starts the accept loop that injects received messages into `writer`
-    /// as bracketed pastes, and hands back an [`IpcServer`] for cleanup.
-    pub fn serve(self, writer: SharedWriter) -> IpcServer {
+    /// Starts the accept loop that injects received text messages into
+    /// `writer` as bracketed pastes (and routes control frames to `control`),
+    /// and hands back an [`IpcServer`] for cleanup.
+    pub fn serve(self, writer: SharedWriter, control: ControlChannels) -> IpcServer {
         let listener = self.listener;
         thread::spawn(move || {
             for stream in listener.incoming() {
@@ -140,6 +204,12 @@ impl BoundSocket {
                     .is_err()
                     || message.is_empty()
                 {
+                    continue;
+                }
+                // A leading NUL marks a control frame (status wake / transcript
+                // path); anything else is text to paste into the child.
+                if message.first() == Some(&CONTROL_PREFIX) {
+                    dispatch_control(&message[1..], &control);
                     continue;
                 }
                 let mut guard = writer.lock().expect("child writer poisoned");
@@ -186,6 +256,20 @@ pub fn resolve_socket(socket: Option<PathBuf>) -> io::Result<PathBuf> {
             cwd.display()
         )))
     }
+}
+
+/// Resolves the socket for `zedic notify`. Unlike [`resolve_socket`], a
+/// missing session is not an error: notify is best-effort so a plugin hook
+/// never fails the agent. Returns `None` when no live session owns the socket.
+/// `cwd` (the hook's reported working directory) keys the lookup when set,
+/// otherwise the project cwd is used; `explicit` overrides both.
+pub fn notify_target(cwd: Option<PathBuf>, explicit: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(path) = explicit {
+        return Some(path);
+    }
+    let cwd = cwd.map(|c| canonical(&c)).unwrap_or_else(project_cwd);
+    let path = socket_path_for(&cwd);
+    UnixStream::connect(&path).is_ok().then_some(path)
 }
 
 /// Sends `message` to the wrapper listening on `socket`.
@@ -304,6 +388,17 @@ mod tests {
         }
     }
 
+    /// Control channels for tests that exercise text injection only and do not
+    /// care about control frames (no wake is ever sent, so the dropped receiver
+    /// is harmless).
+    fn discard_channels() -> ControlChannels {
+        let (wake, _rx) = std::sync::mpsc::channel();
+        ControlChannels {
+            wake,
+            transcript: Arc::new(Mutex::new(None)),
+        }
+    }
+
     /// Runs `test` with an isolated runtime dir and project root. Serialized,
     /// because it mutates process-wide environment variables.
     fn with_env<T>(project: &Path, test: impl FnOnce() -> T) -> T {
@@ -330,7 +425,7 @@ mod tests {
             let capture = Capture::default();
             let sink = capture.0.clone();
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(capture)));
-            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
 
             let socket = resolve_socket(None).unwrap();
             send(&socket, b"src/main.rs:4 ").unwrap();
@@ -354,7 +449,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
             let resolved = resolve_socket(None).unwrap();
             assert_eq!(resolved, socket_path_for(&canonical(project.path())));
             assert!(UnixStream::connect(&resolved).is_ok());
@@ -367,7 +462,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let first = IpcServer::bind_project().unwrap().serve(writer);
+            let first = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
             let err = IpcServer::bind_project()
                 .err()
                 .expect("second bind must fail");
@@ -412,7 +507,7 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             drop(UnixListener::bind(&path).unwrap()); // bound then closed -> dead
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
             assert!(UnixStream::connect(socket_path_for(&canonical(project.path()))).is_ok());
             drop(server);
         });
@@ -423,7 +518,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
             let socket = socket_path_for(&canonical(project.path()));
             let info = socket.with_extension("info");
             assert!(socket.exists() && info.exists());
@@ -437,7 +532,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer);
+            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
             let sessions = list_sessions();
             assert_eq!(sessions.len(), 1);
             assert!(sessions[0].alive);
@@ -467,6 +562,86 @@ mod tests {
         assert!(msg.contains("````\n"));
         assert!(msg.contains(text));
         assert_eq!(msg.matches("````").count(), 2);
+    }
+
+    #[test]
+    fn encode_control_frames_start_with_nul_and_roundtrip() {
+        let wake = encode_control(&Control::Wake).unwrap();
+        assert_eq!(wake[0], CONTROL_PREFIX);
+        assert_eq!(
+            serde_json::from_slice::<Control>(&wake[1..]).unwrap(),
+            Control::Wake
+        );
+        let transcript = encode_control(&Control::Transcript {
+            path: PathBuf::from("/a/b.jsonl"),
+        })
+        .unwrap();
+        assert_eq!(transcript[0], CONTROL_PREFIX);
+        assert_eq!(
+            serde_json::from_slice::<Control>(&transcript[1..]).unwrap(),
+            Control::Transcript {
+                path: PathBuf::from("/a/b.jsonl")
+            }
+        );
+    }
+
+    #[test]
+    fn control_frame_updates_transcript_and_wakes_without_injecting() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            let capture = Capture::default();
+            let sink = capture.0.clone();
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(capture)));
+            let (wake, rx) = std::sync::mpsc::channel();
+            let transcript = Arc::new(Mutex::new(None));
+            let server = IpcServer::bind_project().unwrap().serve(
+                writer,
+                ControlChannels {
+                    wake,
+                    transcript: transcript.clone(),
+                },
+            );
+
+            let socket = resolve_socket(None).unwrap();
+            send(
+                &socket,
+                &encode_control(&Control::Transcript {
+                    path: PathBuf::from("/x/y.jsonl"),
+                })
+                .unwrap(),
+            )
+            .unwrap();
+
+            // The control handler pulses the title thread and stores the path.
+            assert!(matches!(
+                rx.recv_timeout(Duration::from_secs(1)),
+                Ok(TitleSignal::Wake)
+            ));
+            assert_eq!(
+                *transcript.lock().unwrap(),
+                Some(PathBuf::from("/x/y.jsonl"))
+            );
+            // A control frame is never pasted into the child.
+            assert!(sink.lock().unwrap().is_empty());
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn notify_target_is_none_without_a_session() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            assert!(notify_target(None, None).is_none());
+        });
+    }
+
+    #[test]
+    fn notify_target_prefers_explicit_socket() {
+        let explicit = PathBuf::from("/tmp/explicit.sock");
+        assert_eq!(
+            notify_target(None, Some(explicit.clone())),
+            Some(explicit)
+        );
     }
 
     #[test]

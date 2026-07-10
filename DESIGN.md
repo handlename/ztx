@@ -25,13 +25,15 @@ zedic run -- <agent-cli>
 │ term       VTE tap → Scrollback (line buffer) +        │
 │            alt-screen flag + last child title          │
 │ title      OSC 0/2 filter (buffer until terminator) +  │
-│            managed-title thread (adapter polling)      │
+│            managed-title thread (adapter polling, woken │
+│            immediately by IPC for instant refresh)     │
 │ input      prefix-key (ctrl-]) filter on stdin         │
 │ hint       path extraction + in-place labels           │
 │            (modal list fallback on primary screen)     │
 │ export     transcript→Markdown / capture→Markdown      │
 │ ipc        per-project Unix socket (cwd-hash name);    │
-│            `send` client; one session per project      │
+│            `send` (paste) + `notify` (control frames:   │
+│            wake / transcript); one session per project │
 │ adapter    trait + ClaudeCode / Antigravity / fallback │
 │ setup      Zed tasks.json / keymap.json merging        │
 │ config     user config.toml: prefix key, editor,       │
@@ -57,6 +59,14 @@ output).
   `~/.claude/sessions/*.json` and transcript JSONL; agy's
   `conversation_summaries.db` and `last_conversations.json`). Schema drift
   must degrade to fallback behavior, never break the wrapper.
+- **The Claude Code plugin is an optional accelerator, not a dependency.**
+  Its hooks call `zedic notify` over the same per-project socket to wake the
+  title thread and report the transcript path. Polling stays authoritative, so
+  a missed or absent hook only costs latency — the next poll reconciles. A
+  leading NUL distinguishes a control frame from `send`'s paste text, so the
+  wire stays backward compatible. Notify is best-effort: with no live session
+  it is a silent no-op, so a hook never fails the agent. Hook-supplied
+  transcript paths are trusted only under `~/.claude/projects/`.
 - **Terminal restoration is non-negotiable.** Raw mode is guarded by RAII
   plus a panic hook; the managed title is cleared on exit.
 - **Zed config is opt-in.** `setup zed` shows the change, asks, and backs up;

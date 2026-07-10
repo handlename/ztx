@@ -78,6 +78,29 @@ pub enum Command {
         message: Vec<String>,
     },
 
+    /// Notify a running session of an activity change (used by the Claude Code
+    /// plugin hooks; a silent no-op when no session runs in this project)
+    Notify {
+        /// Read the hook JSON from stdin: derive the working directory and
+        /// transcript path, then wake the session's title. Prefer this in
+        /// plugin hooks over the explicit flags below.
+        #[arg(long)]
+        from_hook: bool,
+
+        /// Force the session's managed title to refresh immediately
+        #[arg(long)]
+        wake: bool,
+
+        /// Record the authoritative transcript path for `export`
+        #[arg(long)]
+        transcript: Option<std::path::PathBuf>,
+
+        /// Target a session by explicit socket path (default: this project's
+        /// session, keyed by ZED_WORKTREE_ROOT or the current directory)
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
+    },
+
     /// List running zedic sessions
     Sessions,
 
@@ -148,5 +171,42 @@ mod tests {
     #[test]
     fn run_requires_a_command() {
         assert!(Cli::try_parse_from(["zedic", "run"]).is_err());
+    }
+
+    #[test]
+    fn parses_notify_from_hook() {
+        let cli = Cli::try_parse_from(["zedic", "notify", "--from-hook"]).unwrap();
+        let Command::Notify {
+            from_hook,
+            wake,
+            transcript,
+            ..
+        } = cli.command
+        else {
+            panic!("expected notify subcommand");
+        };
+        assert!(from_hook);
+        assert!(!wake);
+        assert!(transcript.is_none());
+    }
+
+    #[test]
+    fn parses_notify_wake_and_transcript() {
+        let cli = Cli::try_parse_from([
+            "zedic",
+            "notify",
+            "--wake",
+            "--transcript",
+            "/p/t.jsonl",
+        ])
+        .unwrap();
+        let Command::Notify {
+            wake, transcript, ..
+        } = cli.command
+        else {
+            panic!("expected notify subcommand");
+        };
+        assert!(wake);
+        assert_eq!(transcript, Some(std::path::PathBuf::from("/p/t.jsonl")));
     }
 }

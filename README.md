@@ -62,6 +62,8 @@ zedic send --from-zed-env      # inject the Zed selection (reads ZED_* env)
 zedic send --file F --line N --text "..."   # inject explicitly
 zedic send --socket PATH ...   # target a specific session's socket
 zedic sessions                 # list running sessions (pid + cwd)
+zedic notify --from-hook       # refresh title/transcript from a hook (plugin)
+zedic notify [--wake] [--transcript F]   # or drive it explicitly
 zedic setup zed [--yes]        # install the Zed task + keybinding
 ```
 
@@ -83,6 +85,28 @@ the current directory), so sessions in different projects each receive their
 own selections. Starting a second `zedic run` in a project that already has
 a live session is refused. `zedic sessions` lists running sessions (pid +
 cwd); `zedic send --socket <PATH>` targets one explicitly.
+
+### Claude Code plugin (optional, instant titles)
+
+Without any plugin, the Claude adapter polls Claude's session state every two
+seconds, so the title's status emoji (🔄/⏳/🔔) can lag a beat and exports rely
+on deriving the transcript path. Installing the bundled Claude Code plugin
+removes both compromises: its hooks nudge the running zedic session to refresh
+the moment Claude changes state — starts working, finishes, or blocks on a
+prompt — and hand zedic the exact transcript path for exports. Polling stays
+the source of truth, so the plugin only *accelerates* what already works.
+
+The plugin is entirely optional; without it everything still works via polling.
+
+```sh
+# In Claude Code:
+/plugin marketplace add handlename/zedic
+/plugin install zedic@zedic
+```
+
+The hooks run `zedic notify --from-hook`, which is a silent no-op unless a
+zedic session is running in the same project — so it never interferes with a
+plain `claude` started outside zedic. `zedic` must be on your `PATH`.
 
 ## Configuration
 

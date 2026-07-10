@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedic",
+            "args": ["notify", "--from-hook"],
+            "timeout": 5,
+            "statusMessage": "zedic: refresh title"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedic",
+            "args": ["notify", "--from-hook"],
+            "timeout": 5,
+            "statusMessage": "zedic: refresh title"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedic",
+            "args": ["notify", "--from-hook"],
+            "timeout": 5,
+            "statusMessage": "zedic: refresh title"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zedic",
+            "args": ["notify", "--from-hook"],
+            "timeout": 5,
+            "statusMessage": "zedic: refresh title"
+          }
+        ]
+      }
+    ]
+  }
+}
