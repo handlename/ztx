@@ -22,6 +22,12 @@ const IO_BUF_SIZE: usize = 8192;
 /// bound on staleness, not the common-case latency.
 const TITLE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Grace given to the child to exit on its own after the controlling terminal
+/// is lost (SIGHUP) before the wrapper force-kills it. Bounds how long a child
+/// that traps SIGHUP can keep the (now unusable) wrapper — and its socket —
+/// alive before teardown.
+const HANGUP_GRACE: Duration = Duration::from_secs(2);
+
 pub struct RunOptions {
     pub title_mode: Option<TitleMode>,
     pub title_prefix: Option<String>,
@@ -137,6 +143,27 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                         .lock()
                         .expect("tap lock poisoned")
                         .screen_rows = size.rows;
+                }
+                SIGHUP => {
+                    // The controlling terminal is gone (e.g. the editor pane or
+                    // window closed): this session can no longer be seen or
+                    // driven. Forward the hangup so the child may exit and
+                    // persist its own state, but never depend on it — a child
+                    // that traps SIGHUP (Claude Code does, to survive
+                    // disconnects) would otherwise strand this wrapper, leaving
+                    // a listening-but-detached socket that blocks the next
+                    // `zedic run` in the project. Escalate to SIGKILL after a
+                    // short grace so `child.wait()` returns and we tear down.
+                    // The pid cannot be recycled meanwhile: the main thread has
+                    // not reaped the child yet, so it stays ours even as a
+                    // zombie, making the delayed SIGKILL safe.
+                    if let Some(pid) = child_pid.and_then(|p| i32::try_from(p).ok()) {
+                        // SAFETY: single-process signals to our own child; the
+                        // checked conversion rules out a negative (group) pid.
+                        unsafe { libc::kill(pid, SIGHUP) };
+                        thread::sleep(HANGUP_GRACE);
+                        unsafe { libc::kill(pid, libc::SIGKILL) };
+                    }
                 }
                 _ => {
                     if let Some(pid) = child_pid.and_then(|p| i32::try_from(p).ok()) {
