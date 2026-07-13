@@ -51,7 +51,15 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     // runtime dir) is non-fatal: the wrapper runs without selection sharing.
     let bound = match crate::ipc::IpcServer::bind_project() {
         Ok(bound) => Some(bound),
-        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => return Err(err),
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+            // A session already owns this project's socket — often one orphaned
+            // by an editor restart, still listening but detached from any
+            // terminal. Report it and, when interactive, offer to replace it.
+            match reclaim_project_socket()? {
+                Some(bound) => Some(bound),
+                None => return Ok(1),
+            }
+        }
         Err(err) => {
             tracing::warn!(error = %err, "failed to bind IPC socket; selection sharing disabled");
             None
@@ -326,6 +334,59 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
 
     tracing::debug!(exit_code = status.exit_code(), "child exited");
     Ok(status.exit_code())
+}
+
+/// Handles a `bind_project` collision: describes the session blocking this
+/// project and, when stdin is interactive, offers to terminate it and start
+/// fresh here. Returns the rebound socket when the user agrees, or `None` when
+/// nothing was started (the session was only reported, so `run` should exit).
+fn reclaim_project_socket() -> io::Result<Option<crate::ipc::BoundSocket>> {
+    let Some(existing) = crate::ipc::existing_project_session() else {
+        // The owner vanished between the failed bind and now: just try again.
+        return crate::ipc::IpcServer::bind_project().map(Some);
+    };
+    let pid_label = existing
+        .pid
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "?".into());
+    let cwd_label = existing
+        .cwd
+        .as_deref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    eprintln!(
+        "zedic: a session is already running in this project\n  \
+         pid:  {pid_label}\n  sock: {}\n  cwd:  {cwd_label}",
+        existing.socket.display()
+    );
+
+    // Never terminate a session without a human's confirmation: a
+    // non-interactive caller (Zed task, pipe) only gets the report above.
+    if !io::stdin().is_terminal() {
+        return Ok(None);
+    }
+    if !prompt_yes_no("terminate it and start a new session here?")? {
+        return Ok(None);
+    }
+    let Some(pid) = existing.pid else {
+        return Err(io::Error::other(
+            "cannot terminate the existing session: its pid was not recorded",
+        ));
+    };
+    crate::ipc::terminate_session(pid, &existing.socket)?;
+    crate::ipc::IpcServer::bind_project().map(Some)
+}
+
+/// Prompts `question` on stderr and reads a yes/no answer from stdin. EOF or an
+/// empty line is a safe "no". Mirrors `setup::confirm`; runs before raw mode is
+/// entered and before the stdin pump thread starts, so the shared stdin is free.
+fn prompt_yes_no(question: &str) -> io::Result<bool> {
+    use std::io::BufRead;
+    eprint!("{question} [y/N] ");
+    io::stderr().flush()?;
+    let mut answer = String::new();
+    io::stdin().lock().read_line(&mut answer)?;
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
 }
 
 type SharedAdapter = Arc<Mutex<Option<Box<dyn crate::adapter::Adapter>>>>;

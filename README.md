@@ -61,7 +61,7 @@ zedic export [--stdout]        # export the latest session for this cwd
 zedic send --from-zed-env      # inject the Zed selection (reads ZED_* env)
 zedic send --file F --line N --text "..."   # inject explicitly
 zedic send --socket PATH ...   # target a specific session's socket
-zedic sessions                 # list running sessions (pid + cwd)
+zedic sessions                 # list running sessions (pid + socket + cwd)
 zedic notify --from-hook       # refresh title/transcript from a hook (plugin)
 zedic notify [--wake] [--transcript F]   # or drive it explicitly
 zedic setup zed [--yes]        # install the Zed task + keybinding
@@ -83,8 +83,11 @@ One session per project. A bare `zedic send` routes to the session whose
 working directory matches the editor's project root (`ZED_WORKTREE_ROOT`, else
 the current directory), so sessions in different projects each receive their
 own selections. Starting a second `zedic run` in a project that already has
-a live session is refused. `zedic sessions` lists running sessions (pid +
-cwd); `zedic send --socket <PATH>` targets one explicitly.
+a live session reports that session (pid + socket + cwd); when run
+interactively it offers to terminate it and start fresh in the current
+terminal — useful for reclaiming a session orphaned by an editor restart.
+`zedic sessions` lists running sessions (pid + socket + cwd); `zedic send
+--socket <PATH>` targets one explicitly.
 
 ### Claude Code plugin (optional, instant titles)
 

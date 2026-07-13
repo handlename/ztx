@@ -4,10 +4,12 @@
 //! project directory it runs in, so `zedic send` resolves the target in
 //! O(1): both sides hash the project root (`ZED_WORKTREE_ROOT`, else the
 //! current directory) to the same `<hash>.sock` path — no scanning, no
-//! registry. This assumes one session per project: `zedic run` refuses to
-//! start when a live session already owns the project's socket. `--socket`
-//! overrides the target explicitly. A sibling `<hash>.info` records pid and
-//! cwd for `zedic sessions` display only (never used for resolution).
+//! registry. This assumes one session per project: when a live session already
+//! owns the project's socket, `zedic run` reports it and (interactively) offers
+//! to terminate it and rebind, rather than silently launching a second one.
+//! `--socket` overrides the target explicitly. A sibling `<hash>.info` records
+//! pid and cwd; it feeds `zedic sessions` display and `run`'s collision report
+//! (including the pid to terminate), but is never used for socket resolution.
 
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -279,12 +281,82 @@ pub fn send(socket: &Path, message: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// The live session owning this project's socket, if any. Used by `run` to
+/// describe (and offer to replace) a session that is blocking a fresh start —
+/// typically one orphaned by an editor restart, still listening but no longer
+/// attached to any terminal. Returns `None` when the project's socket has no
+/// live owner.
+pub fn existing_project_session() -> Option<SessionInfo> {
+    let cwd = project_cwd();
+    let socket = socket_path_for(&cwd);
+    if UnixStream::connect(&socket).is_err() {
+        return None;
+    }
+    let (pid, info_cwd) = read_info(&socket.with_extension("info"));
+    Some(SessionInfo {
+        pid,
+        alive: true,
+        // Fall back to the resolved project dir when the `.info` file is
+        // missing or unreadable, so callers always have a directory to show.
+        cwd: info_cwd.or(Some(cwd)),
+        socket,
+    })
+}
+
+/// Terminates the wrapper process `pid` and waits for `socket` to be released,
+/// so the project can be rebound. Sends SIGTERM first (letting the wrapper and
+/// its child exit gracefully) and escalates to SIGKILL if the socket has not
+/// been freed within a short window. Errors only when the socket is still owned
+/// after the escalation.
+pub fn terminate_session(pid: u32, socket: &Path) -> io::Result<()> {
+    const GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+    signal(pid, libc::SIGTERM);
+    if wait_socket_released(socket, GRACE) {
+        return Ok(());
+    }
+    signal(pid, libc::SIGKILL);
+    if wait_socket_released(socket, GRACE) {
+        return Ok(());
+    }
+    Err(io::Error::other(format!(
+        "existing session (pid {pid}) did not release {} after SIGKILL",
+        socket.display()
+    )))
+}
+
+/// Sends `sig` to `pid`; best-effort (a vanished pid is not an error here).
+fn signal(pid: u32, sig: libc::c_int) {
+    if let Ok(pid) = i32::try_from(pid) {
+        // SAFETY: a plain single-process signal; the checked conversion rules
+        // out a negative pid (process-group) target.
+        unsafe { libc::kill(pid, sig) };
+    }
+}
+
+/// Polls until `socket` stops accepting connections, up to `timeout`. Returns
+/// whether it was released. A socket file may linger on disk after the owner
+/// dies; that is harmless because `bind_project` takes over a stale socket.
+fn wait_socket_released(socket: &Path, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if UnixStream::connect(socket).is_err() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// A discovered session: its wrapper pid, whether it still accepts
-/// connections, and the working directory it was started in (if recorded).
+/// connections, the working directory it was started in (if recorded), and the
+/// socket path that identifies it.
 pub struct SessionInfo {
     pub pid: Option<u32>,
     pub alive: bool,
     pub cwd: Option<PathBuf>,
+    pub socket: PathBuf,
 }
 
 /// Lists known sessions, sorted by pid.
@@ -304,6 +376,7 @@ pub fn list_sessions() -> Vec<SessionInfo> {
             pid,
             alive: UnixStream::connect(&path).is_ok(),
             cwd,
+            socket: path,
         });
     }
     sessions.sort_unstable_by_key(|s| s.pid);
@@ -538,8 +611,38 @@ mod tests {
             assert!(sessions[0].alive);
             assert_eq!(sessions[0].pid, Some(std::process::id()));
             assert_eq!(sessions[0].cwd, Some(canonical(project.path())));
+            assert_eq!(sessions[0].socket, socket_path_for(&canonical(project.path())));
             drop(server);
         });
+    }
+
+    #[test]
+    fn existing_project_session_reports_socket_and_pid() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            // No session yet: nothing to report.
+            assert!(existing_project_session().is_none());
+
+            let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
+            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let found = existing_project_session().expect("live session must be found");
+            assert!(found.alive);
+            assert_eq!(found.pid, Some(std::process::id()));
+            assert_eq!(found.socket, socket_path_for(&canonical(project.path())));
+            assert_eq!(found.cwd, Some(canonical(project.path())));
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn wait_socket_released_is_true_when_no_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("absent.sock");
+        // Nothing ever listened here, so it is already "released".
+        assert!(wait_socket_released(
+            &socket,
+            std::time::Duration::from_millis(100)
+        ));
     }
 
     #[test]

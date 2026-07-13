@@ -197,7 +197,8 @@ fn run_sessions() -> std::io::Result<()> {
             .as_deref()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
-        println!("{pid}\t{state}\t{cwd}");
+        let sock = session.socket.display();
+        println!("{pid}\t{state}\t{sock}\t{cwd}");
     }
     Ok(())
 }
