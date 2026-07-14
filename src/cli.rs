@@ -118,7 +118,25 @@ pub enum SetupTarget {
         /// Apply changes without asking for confirmation
         #[arg(long)]
         yes: bool,
+
+        /// Show the changes that would be made without writing any files
+        #[arg(long)]
+        preview: bool,
+
+        /// Where to write the Zed configuration
+        #[arg(long, value_enum, default_value_t)]
+        scope: SetupScope,
     },
+}
+
+/// Destination for `zedic setup zed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum SetupScope {
+    /// User-global config in `~/.config/zed/`.
+    #[default]
+    Global,
+    /// Project-local config in `<worktree>/.zed/`.
+    Project,
 }
 
 #[cfg(test)]

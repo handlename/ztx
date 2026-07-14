@@ -65,7 +65,11 @@ fn main() -> ExitCode {
         } => report(run_notify(from_hook, wake, transcript, socket)),
         cli::Command::Sessions => report(run_sessions()),
         cli::Command::Setup { target } => match target {
-            cli::SetupTarget::Zed { yes } => report(setup::zed(yes)),
+            cli::SetupTarget::Zed {
+                yes,
+                preview,
+                scope,
+            } => report(setup::zed(yes, preview, scope)),
         },
     }
 }

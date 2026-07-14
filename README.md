@@ -65,6 +65,8 @@ zedic sessions                 # list running sessions (pid + socket + cwd)
 zedic notify --from-hook       # refresh title/transcript from a hook (plugin)
 zedic notify [--wake] [--transcript F]   # or drive it explicitly
 zedic setup zed [--yes]        # install the Zed task + keybinding
+zedic setup zed --preview      # show what would change, write nothing
+zedic setup zed --scope project   # install into ./.zed instead of ~/.config/zed
 ```
 
 ### Zed integration
@@ -73,6 +75,13 @@ Run `zedic setup zed` once. It merges (with confirmation and a backup):
 
 - a task `zedic: send selection` into `~/.config/zed/tasks.json`
 - a keybinding `cmd-alt-z` into `~/.config/zed/keymap.json`
+
+Pass `--preview` to print the additions without writing any files. Pass
+`--scope project` to install into the project-local `<worktree>/.zed/`
+(rooted at `ZED_WORKTREE_ROOT`, else the current directory) instead of the
+global config. Because Zed has no project-local keymap, project scope writes
+only the task and prints the keybinding for you to add to the global
+`~/.config/zed/keymap.json` yourself.
 
 After that, selecting text in the editor and pressing `cmd-alt-z` sends
 `file:line` plus the selected text into the zedic session running in the

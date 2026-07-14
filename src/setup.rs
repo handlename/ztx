@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::cli::SetupScope;
+
 const TASK_LABEL: &str = "zedic: send selection";
 const KEY_BINDING: &str = "cmd-alt-z";
 
@@ -23,6 +25,17 @@ fn zed_config_dir() -> PathBuf {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home).join(".config/zed")
+}
+
+/// Project-local Zed config directory: `<worktree>/.zed`, where the worktree
+/// is `$ZED_WORKTREE_ROOT` (as used elsewhere for session keying) or the
+/// current directory.
+fn project_config_dir() -> PathBuf {
+    let root = std::env::var("ZED_WORKTREE_ROOT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| ".".into());
+    PathBuf::from(root).join(".zed")
 }
 
 fn task_entry() -> Value {
@@ -49,26 +62,56 @@ fn keymap_entry() -> Value {
 }
 
 /// Entry point for `zedic setup zed`.
-pub fn zed(assume_yes: bool) -> io::Result<()> {
-    let dir = zed_config_dir();
-    std::fs::create_dir_all(&dir)?;
+///
+/// `scope` selects the destination (global `~/.config/zed/` or project-local
+/// `<worktree>/.zed/`). `preview` shows the changes without writing anything.
+///
+/// Zed keymaps are global-only (there is no project-local `keymap.json`), so
+/// in project scope the keybinding is printed for manual addition instead of
+/// being merged.
+pub fn zed(assume_yes: bool, preview: bool, scope: SetupScope) -> io::Result<()> {
+    let dir = match scope {
+        SetupScope::Global => zed_config_dir(),
+        SetupScope::Project => project_config_dir(),
+    };
+
+    if !preview {
+        std::fs::create_dir_all(&dir)?;
+    }
 
     merge_array_file(
         &dir.join("tasks.json"),
         task_entry(),
         |existing| existing.get("label").and_then(Value::as_str) == Some(TASK_LABEL),
         assume_yes,
+        preview,
     )?;
-    merge_array_file(
-        &dir.join("keymap.json"),
-        keymap_entry(),
-        |existing| {
-            existing
-                .pointer(&format!("/bindings/{KEY_BINDING}"))
-                .is_some()
-        },
-        assume_yes,
-    )?;
+
+    match scope {
+        SetupScope::Global => {
+            merge_array_file(
+                &dir.join("keymap.json"),
+                keymap_entry(),
+                |existing| {
+                    existing
+                        .pointer(&format!("/bindings/{KEY_BINDING}"))
+                        .is_some()
+                },
+                assume_yes,
+                preview,
+            )?;
+        }
+        SetupScope::Project => {
+            // Zed keymaps are global-only; there is no project-local
+            // keymap.json. Print the binding for manual merging instead.
+            println!(
+                "\nZed keymaps are global-only (no project-local keymap.json). \
+                 Add this to ~/.config/zed/keymap.json manually, or run \
+                 `zedic setup zed` with the default --scope global:\n{}\n",
+                serde_json::to_string_pretty(&keymap_entry())?
+            );
+        }
+    }
 
     // Zed replaces (not extends) `terminal.path_hyperlink_regexes` when the
     // user sets it, so auto-merging could drop Zed's built-in patterns.
@@ -81,10 +124,14 @@ pub fn zed(assume_yes: bool) -> io::Result<()> {
          you still want). zedic's hint mode (ctrl-] f) works regardless."
     );
 
-    println!(
-        "\nDone. In Zed, select text and press {KEY_BINDING} to send the \
-         selection into the running zedic session."
-    );
+    if preview {
+        println!("\nPreview only: no files were modified.");
+    } else {
+        println!(
+            "\nDone. In Zed, select text and press {KEY_BINDING} to send the \
+             selection into the running zedic session."
+        );
+    }
     Ok(())
 }
 
@@ -94,6 +141,7 @@ fn merge_array_file(
     entry: Value,
     already_present: impl Fn(&Value) -> bool,
     assume_yes: bool,
+    preview: bool,
 ) -> io::Result<()> {
     let pretty_entry = serde_json::to_string_pretty(&entry)?;
 
@@ -124,6 +172,11 @@ fn merge_array_file(
     }
 
     println!("Will add to {}:\n{pretty_entry}\n", path.display());
+
+    if preview {
+        return Ok(());
+    }
+
     if !assume_yes && !confirm()? {
         println!("Skipped {}", path.display());
         return Ok(());
@@ -150,8 +203,10 @@ fn confirm() -> io::Result<bool> {
 mod tests {
     use super::*;
 
+    // Serializes tests that mutate process-global environment variables.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn in_config_dir<T>(test: impl FnOnce(&Path) -> T) -> T {
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         // SAFETY: guarded by ENV_LOCK; tests in this module run one at a time.
@@ -161,10 +216,20 @@ mod tests {
         result
     }
 
+    fn in_worktree<T>(test: impl FnOnce(&Path) -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: guarded by ENV_LOCK; tests in this module run one at a time.
+        unsafe { std::env::set_var("ZED_WORKTREE_ROOT", dir.path()) };
+        let result = test(dir.path());
+        unsafe { std::env::remove_var("ZED_WORKTREE_ROOT") };
+        result
+    }
+
     #[test]
     fn creates_fresh_config_files() {
         in_config_dir(|dir| {
-            zed(true).unwrap();
+            zed(true, false, SetupScope::Global).unwrap();
             let tasks: Value =
                 serde_json::from_str(&std::fs::read_to_string(dir.join("tasks.json")).unwrap())
                     .unwrap();
@@ -184,7 +249,7 @@ mod tests {
                 r#"[{"label": "user task", "command": "make"}]"#,
             )
             .unwrap();
-            zed(true).unwrap();
+            zed(true, false, SetupScope::Global).unwrap();
             let tasks: Value =
                 serde_json::from_str(&std::fs::read_to_string(dir.join("tasks.json")).unwrap())
                     .unwrap();
@@ -197,8 +262,8 @@ mod tests {
     #[test]
     fn running_twice_is_idempotent() {
         in_config_dir(|dir| {
-            zed(true).unwrap();
-            zed(true).unwrap();
+            zed(true, false, SetupScope::Global).unwrap();
+            zed(true, false, SetupScope::Global).unwrap();
             let tasks: Value =
                 serde_json::from_str(&std::fs::read_to_string(dir.join("tasks.json")).unwrap())
                     .unwrap();
@@ -211,11 +276,34 @@ mod tests {
         in_config_dir(|dir| {
             let original = "// my tasks\n[]";
             std::fs::write(dir.join("tasks.json"), original).unwrap();
-            zed(true).unwrap();
+            zed(true, false, SetupScope::Global).unwrap();
             assert_eq!(
                 std::fs::read_to_string(dir.join("tasks.json")).unwrap(),
                 original
             );
+        });
+    }
+
+    #[test]
+    fn preview_writes_nothing() {
+        in_config_dir(|dir| {
+            zed(false, true, SetupScope::Global).unwrap();
+            assert!(!dir.join("tasks.json").exists());
+            assert!(!dir.join("keymap.json").exists());
+        });
+    }
+
+    #[test]
+    fn project_scope_writes_task_only_under_dot_zed() {
+        in_worktree(|root| {
+            zed(true, false, SetupScope::Project).unwrap();
+            let tasks: Value = serde_json::from_str(
+                &std::fs::read_to_string(root.join(".zed/tasks.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(tasks[0]["label"], TASK_LABEL);
+            // Zed has no project-local keymap; the binding is only printed.
+            assert!(!root.join(".zed/keymap.json").exists());
         });
     }
 }
