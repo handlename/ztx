@@ -461,10 +461,7 @@ fn handle_action(
         }
         crate::input::InputAction::DumpState => {
             let message = match crate::debug::dump_state(tap, "manual dump (ctrl-] d)") {
-                Ok(path) => format!(
-                    "ztx: state dumped to {} (press any key)",
-                    path.display()
-                ),
+                Ok(path) => format!("ztx: state dumped to {} (press any key)", path.display()),
                 Err(err) => format!("ztx: state dump failed: {err} (press any key)"),
             };
             let mouse_modes = current_mouse_modes(tap);

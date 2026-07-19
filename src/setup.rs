@@ -164,10 +164,7 @@ fn merge_array_file(
     };
 
     if items.iter().any(&already_present) {
-        println!(
-            "{}: ztx entry already present, skipping",
-            path.display()
-        );
+        println!("{}: ztx entry already present, skipping", path.display());
         return Ok(());
     }
 

@@ -176,10 +176,7 @@ fn stale_exports(dir: &Path, now: SystemTime, max_age: Duration) -> Vec<PathBuf>
         let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
             continue;
         };
-        if now
-            .duration_since(mtime)
-            .is_ok_and(|age| age > max_age)
-        {
+        if now.duration_since(mtime).is_ok_and(|age| age > max_age) {
             stale.push(path);
         }
     }
@@ -378,9 +375,7 @@ mod tests {
             .unwrap()
             .set_modified(now + day)
             .unwrap();
-        assert!(
-            stale_exports(dir.path(), now, Duration::from_secs(1)).is_empty()
-        );
+        assert!(stale_exports(dir.path(), now, Duration::from_secs(1)).is_empty());
     }
 
     #[test]

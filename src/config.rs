@@ -165,7 +165,11 @@ fn config_path() -> Option<PathBuf> {
         .ok()
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))?;
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".config"))
+        })?;
     Some(config_home.join("ztx").join("config.toml"))
 }
 

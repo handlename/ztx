@@ -184,10 +184,7 @@ fn read_hook_input() -> std::io::Result<HookInput> {
 fn run_sessions() -> std::io::Result<()> {
     let sessions = ipc::list_sessions();
     if sessions.is_empty() {
-        println!(
-            "no running ztx sessions ({})",
-            ipc::socket_dir().display()
-        );
+        println!("no running ztx sessions ({})", ipc::socket_dir().display());
         return Ok(());
     }
     for session in sessions {

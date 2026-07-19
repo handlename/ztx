@@ -498,7 +498,9 @@ mod tests {
             let capture = Capture::default();
             let sink = capture.0.clone();
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(capture)));
-            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let server = IpcServer::bind_project()
+                .unwrap()
+                .serve(writer, discard_channels());
 
             let socket = resolve_socket(None).unwrap();
             send(&socket, b"src/main.rs:4 ").unwrap();
@@ -522,7 +524,9 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let server = IpcServer::bind_project()
+                .unwrap()
+                .serve(writer, discard_channels());
             let resolved = resolve_socket(None).unwrap();
             assert_eq!(resolved, socket_path_for(&canonical(project.path())));
             assert!(UnixStream::connect(&resolved).is_ok());
@@ -535,7 +539,9 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let first = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let first = IpcServer::bind_project()
+                .unwrap()
+                .serve(writer, discard_channels());
             let err = IpcServer::bind_project()
                 .err()
                 .expect("second bind must fail");
@@ -580,7 +586,9 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             drop(UnixListener::bind(&path).unwrap()); // bound then closed -> dead
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let server = IpcServer::bind_project()
+                .unwrap()
+                .serve(writer, discard_channels());
             assert!(UnixStream::connect(socket_path_for(&canonical(project.path()))).is_ok());
             drop(server);
         });
@@ -591,7 +599,9 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let server = IpcServer::bind_project()
+                .unwrap()
+                .serve(writer, discard_channels());
             let socket = socket_path_for(&canonical(project.path()));
             let info = socket.with_extension("info");
             assert!(socket.exists() && info.exists());
@@ -605,13 +615,18 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         with_env(project.path(), || {
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let server = IpcServer::bind_project()
+                .unwrap()
+                .serve(writer, discard_channels());
             let sessions = list_sessions();
             assert_eq!(sessions.len(), 1);
             assert!(sessions[0].alive);
             assert_eq!(sessions[0].pid, Some(std::process::id()));
             assert_eq!(sessions[0].cwd, Some(canonical(project.path())));
-            assert_eq!(sessions[0].socket, socket_path_for(&canonical(project.path())));
+            assert_eq!(
+                sessions[0].socket,
+                socket_path_for(&canonical(project.path()))
+            );
             drop(server);
         });
     }
@@ -624,7 +639,9 @@ mod tests {
             assert!(existing_project_session().is_none());
 
             let writer: SharedWriter = Arc::new(Mutex::new(Box::new(Capture::default())));
-            let server = IpcServer::bind_project().unwrap().serve(writer, discard_channels());
+            let server = IpcServer::bind_project()
+                .unwrap()
+                .serve(writer, discard_channels());
             let found = existing_project_session().expect("live session must be found");
             assert!(found.alive);
             assert_eq!(found.pid, Some(std::process::id()));
@@ -741,10 +758,7 @@ mod tests {
     #[test]
     fn notify_target_prefers_explicit_socket() {
         let explicit = PathBuf::from("/tmp/explicit.sock");
-        assert_eq!(
-            notify_target(None, Some(explicit.clone())),
-            Some(explicit)
-        );
+        assert_eq!(notify_target(None, Some(explicit.clone())), Some(explicit));
     }
 
     #[test]

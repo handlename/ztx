@@ -49,10 +49,16 @@ pub fn resolve(
     let program = command.first().map(|c| basename(c))?;
     match kind {
         AdapterKind::None => None,
-        AdapterKind::Claude => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid, status_emoji))),
+        AdapterKind::Claude => Some(Box::new(ClaudeCodeAdapter::from_env(
+            child_pid,
+            status_emoji,
+        ))),
         AdapterKind::Antigravity => Some(Box::new(AntigravityAdapter::from_env())),
         AdapterKind::Auto => match program {
-            "claude" => Some(Box::new(ClaudeCodeAdapter::from_env(child_pid, status_emoji))),
+            "claude" => Some(Box::new(ClaudeCodeAdapter::from_env(
+                child_pid,
+                status_emoji,
+            ))),
             "agy" | "antigravity" => Some(Box::new(AntigravityAdapter::from_env())),
             _ => None,
         },

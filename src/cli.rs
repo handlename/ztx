@@ -210,14 +210,8 @@ mod tests {
 
     #[test]
     fn parses_notify_wake_and_transcript() {
-        let cli = Cli::try_parse_from([
-            "ztx",
-            "notify",
-            "--wake",
-            "--transcript",
-            "/p/t.jsonl",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["ztx", "notify", "--wake", "--transcript", "/p/t.jsonl"]).unwrap();
         let Command::Notify {
             wake, transcript, ..
         } = cli.command
