@@ -2,6 +2,7 @@
 name = "ztx"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.96"
 description = "Mediator between Zed terminal sessions and AI agent CLIs"
 repository = "https://github.com/handlename/ztx"
 license = "MIT"
