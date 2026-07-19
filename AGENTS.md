@@ -31,6 +31,8 @@ All three must pass before a change is considered done.
   `docs:`).
 - Commits are GPG-signed via 1Password; if signing fails, stop and ask the
   user to unlock 1Password.
+- Run `cargo fmt --all` before every commit — unformatted code fails the
+  CI-enforced `cargo fmt --all --check`.
 
 ## Conventions
 
