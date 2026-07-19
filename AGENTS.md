@@ -4,7 +4,7 @@ Guidance for AI agents (and humans) working on this repository.
 
 ## Project
 
-zedic — a Rust PTY-proxy wrapper improving the fit between Zed terminal
+ztx — a Rust PTY-proxy wrapper improving the fit between Zed terminal
 sessions and AI agent CLIs. Read `README.md` (usage), `DESIGN.md`
 (architecture), `REQUIREMENTS.md` (scope), `GLOSSARY.md` (terms) first.
 
@@ -41,7 +41,7 @@ All three must pass before a change is considered done.
   defensively: parse failures return `None`, never panic — the wrapper must
   keep running when adapters break.
 - Never write to stdout/stderr while the child is running (it corrupts the
-  child's screen). Use `tracing` (`ZEDIC_LOG=debug`, file-based).
+  child's screen). Use `tracing` (`ZTX_LOG=debug`, file-based).
 
 ## Testing notes
 
@@ -49,8 +49,8 @@ All three must pass before a change is considered done.
   binary (see the PTY passthrough and hint-mode checks in the history).
   Beware Tcl's `\x` escape: `send "\x1de"` sends U+01DE, not `ctrl-]` + `e`;
   split into two `send` calls.
-- `ZEDIC_RUNTIME_DIR`, `ZEDIC_ZED_CONFIG_DIR`, `ZEDIC_EDITOR`, and
-  `ZEDIC_LOG_FILE` exist so tests never touch real user state.
+- `ZTX_RUNTIME_DIR`, `ZTX_ZED_CONFIG_DIR`, `ZTX_EDITOR`, and
+  `ZTX_LOG_FILE` exist so tests never touch real user state.
 - Verify features against real data when possible (a real Claude Code
   transcript exists for this repo's cwd).
 

@@ -34,7 +34,7 @@ jobs:
       - name: Build and upload binary
         uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: zedic
+          bin: ztx
           target: ${{ matrix.target }}
           archive: $bin-$tag-$target
           checksum: sha256

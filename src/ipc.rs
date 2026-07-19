@@ -1,14 +1,14 @@
 //! IPC channel (feature 4: pull editor selections into the session).
 //!
 //! Each wrapper listens on a Unix socket whose name is derived from the
-//! project directory it runs in, so `zedic send` resolves the target in
+//! project directory it runs in, so `ztx send` resolves the target in
 //! O(1): both sides hash the project root (`ZED_WORKTREE_ROOT`, else the
 //! current directory) to the same `<hash>.sock` path — no scanning, no
 //! registry. This assumes one session per project: when a live session already
-//! owns the project's socket, `zedic run` reports it and (interactively) offers
+//! owns the project's socket, `ztx run` reports it and (interactively) offers
 //! to terminate it and rebind, rather than silently launching a second one.
 //! `--socket` overrides the target explicitly. A sibling `<hash>.info` records
-//! pid and cwd; it feeds `zedic sessions` display and `run`'s collision report
+//! pid and cwd; it feeds `ztx sessions` display and `run`'s collision report
 //! (including the pid to terminate), but is never used for socket resolution.
 
 use std::io::{self, Read, Write};
@@ -34,7 +34,7 @@ const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
 /// NUL, so the two are unambiguous on the wire and `send` stays unchanged.
 const CONTROL_PREFIX: u8 = 0x00;
 
-/// A control message from `zedic notify` (emitted by the Claude Code plugin
+/// A control message from `ztx notify` (emitted by the Claude Code plugin
 /// hooks). Carried over the same per-project socket as `send`, distinguished
 /// by the [`CONTROL_PREFIX`] byte.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,7 +91,7 @@ fn dispatch_control(payload: &[u8], control: &ControlChannels) {
 
 /// Per-user runtime directory holding the session sockets.
 pub fn socket_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("ZEDIC_RUNTIME_DIR")
+    if let Ok(dir) = std::env::var("ZTX_RUNTIME_DIR")
         && !dir.is_empty()
     {
         return PathBuf::from(dir);
@@ -99,10 +99,10 @@ pub fn socket_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
         && !dir.is_empty()
     {
-        return PathBuf::from(dir).join("zedic");
+        return PathBuf::from(dir).join("ztx");
     }
     // macOS: $TMPDIR is per-user and mode 0700.
-    std::env::temp_dir().join("zedic-run")
+    std::env::temp_dir().join("ztx-run")
 }
 
 /// Canonicalizes a path, falling back to the input so symlink differences
@@ -168,7 +168,7 @@ impl IpcServer {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 format!(
-                    "a zedic session is already running in this project ({})",
+                    "a ztx session is already running in this project ({})",
                     cwd.display()
                 ),
             ));
@@ -240,7 +240,7 @@ impl Drop for IpcServer {
     }
 }
 
-/// Resolves the target socket for `zedic send`: an explicit `--socket`,
+/// Resolves the target socket for `ztx send`: an explicit `--socket`,
 /// otherwise this project's deterministic socket. Errors when no live session
 /// owns it.
 pub fn resolve_socket(socket: Option<PathBuf>) -> io::Result<PathBuf> {
@@ -253,14 +253,14 @@ pub fn resolve_socket(socket: Option<PathBuf>) -> io::Result<PathBuf> {
         Ok(path)
     } else {
         Err(io::Error::other(format!(
-            "no zedic session running for this project ({}); \
-             start one with `zedic run -- <cli>`",
+            "no ztx session running for this project ({}); \
+             start one with `ztx run -- <cli>`",
             cwd.display()
         )))
     }
 }
 
-/// Resolves the socket for `zedic notify`. Unlike [`resolve_socket`], a
+/// Resolves the socket for `ztx notify`. Unlike [`resolve_socket`], a
 /// missing session is not an error: notify is best-effort so a plugin hook
 /// never fails the agent. Returns `None` when no live session owns the socket.
 /// `cwd` (the hook's reported working directory) keys the lookup when set,
@@ -394,7 +394,7 @@ fn read_info(info_path: &Path) -> (Option<u32>, Option<PathBuf>) {
     (pid, cwd)
 }
 
-/// Builds the message text for `zedic send`.
+/// Builds the message text for `ztx send`.
 ///
 /// The bare `file:line ` form mirrors Zed's built-in AddSelectionToThread
 /// paste; the fenced block carries the selected text when provided.
@@ -480,12 +480,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // SAFETY: guarded by ENV_LOCK; these tests run one at a time.
         unsafe {
-            std::env::set_var("ZEDIC_RUNTIME_DIR", dir.path());
+            std::env::set_var("ZTX_RUNTIME_DIR", dir.path());
             std::env::set_var("ZED_WORKTREE_ROOT", project);
         }
         let result = test();
         unsafe {
-            std::env::remove_var("ZEDIC_RUNTIME_DIR");
+            std::env::remove_var("ZTX_RUNTIME_DIR");
             std::env::remove_var("ZED_WORKTREE_ROOT");
         }
         result

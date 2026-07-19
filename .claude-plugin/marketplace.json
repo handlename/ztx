@@ -1,13 +1,13 @@
 {
-  "name": "zedic",
+  "name": "ztx",
   "owner": {
     "name": "handlename"
   },
   "plugins": [
     {
-      "name": "zedic",
-      "source": "./plugins/zedic",
-      "description": "Push session status and transcript path to a running zedic wrapper so Zed terminal titles update instantly and exports find the right transcript."
+      "name": "ztx",
+      "source": "./plugins/ztx",
+      "description": "Push session status and transcript path to a running ztx wrapper so Zed terminal titles update instantly and exports find the right transcript."
     }
   ]
 }

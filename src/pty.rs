@@ -32,7 +32,7 @@ pub struct RunOptions {
     pub title_mode: Option<TitleMode>,
     pub title_prefix: Option<String>,
     pub adapter: AdapterKind,
-    /// zedic prefix key byte (from config, or `input::DEFAULT_PREFIX`).
+    /// ztx prefix key byte (from config, or `input::DEFAULT_PREFIX`).
     pub prefix: u8,
     /// Editor command line from config; `None` uses env/`zed`/`$EDITOR`.
     pub editor: Option<String>,
@@ -152,7 +152,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                     // that traps SIGHUP (Claude Code does, to survive
                     // disconnects) would otherwise strand this wrapper, leaving
                     // a listening-but-detached socket that blocks the next
-                    // `zedic run` in the project. Escalate to SIGKILL after a
+                    // `ztx run` in the project. Escalate to SIGKILL after a
                     // short grace so `child.wait()` returns and we tear down.
                     // The pid cannot be recycled meanwhile: the main thread has
                     // not reaped the child yet, so it stays ours even as a
@@ -185,7 +185,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let (title_tx, title_rx) = mpsc::channel::<TitleSignal>();
     let transcript_store: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
 
-    // Start serving `zedic send` on the socket claimed above (if any).
+    // Start serving `ztx send` on the socket claimed above (if any).
     // Kept alive for the session; dropped on exit to clean up the socket.
     let _ipc = bound.map(|b| {
         b.serve(
@@ -197,7 +197,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         )
     });
 
-    // stdin -> child, with zedic's prefix-key bindings peeled off when the
+    // stdin -> child, with ztx's prefix-key bindings peeled off when the
     // input is interactive. Left detached: reads from stdin cannot be
     // interrupted portably, and the thread dies with the process.
     let input_is_tty = io::stdin().is_terminal();
@@ -344,7 +344,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                 }
             }
             // Clear the title on exit so a stale activity name does not stick
-            // to the terminal after zedic is gone.
+            // to the terminal after ztx is gone.
             let _gate = gate.lock().expect("stdout gate poisoned");
             let _ = crate::title::emit_title(&mut stdout, "");
         })
@@ -382,7 +382,7 @@ fn reclaim_project_socket() -> io::Result<Option<crate::ipc::BoundSocket>> {
         .map(|p| p.display().to_string())
         .unwrap_or_default();
     eprintln!(
-        "zedic: a session is already running in this project\n  \
+        "ztx: a session is already running in this project\n  \
          pid:  {pid_label}\n  sock: {}\n  cwd:  {cwd_label}",
         existing.socket.display()
     );
@@ -462,10 +462,10 @@ fn handle_action(
         crate::input::InputAction::DumpState => {
             let message = match crate::debug::dump_state(tap, "manual dump (ctrl-] d)") {
                 Ok(path) => format!(
-                    "zedic: state dumped to {} (press any key)",
+                    "ztx: state dumped to {} (press any key)",
                     path.display()
                 ),
-                Err(err) => format!("zedic: state dump failed: {err} (press any key)"),
+                Err(err) => format!("ztx: state dump failed: {err} (press any key)"),
             };
             let mouse_modes = current_mouse_modes(tap);
             let _gate = gate.lock().expect("stdout gate poisoned");
@@ -528,7 +528,7 @@ fn handle_action(
                 let _ = crate::hint::show_message(
                     stdin,
                     &mut stdout,
-                    &format!("zedic: no file paths found{dump} (press any key)"),
+                    &format!("ztx: no file paths found{dump} (press any key)"),
                     &mouse_modes,
                 );
                 return;

@@ -17,7 +17,7 @@ pub enum TitleMode {
     /// Forward the child's titles unchanged.
     #[default]
     Passthrough,
-    /// Suppress the child's titles; zedic emits its own (adapter-driven).
+    /// Suppress the child's titles; ztx emits its own (adapter-driven).
     Managed,
     /// Rewrite the child's titles with a fixed prefix.
     Prefix,
@@ -124,7 +124,7 @@ impl TitleFilter {
         match parse_title(&self.osc_buf) {
             Some(title) => match self.mode {
                 TitleMode::Passthrough => out.extend_from_slice(&self.osc_buf),
-                TitleMode::Managed => {} // suppressed; zedic emits its own
+                TitleMode::Managed => {} // suppressed; ztx emits its own
                 TitleMode::Prefix => {
                     out.extend_from_slice(&format_title(&format!("{}{title}", self.prefix)));
                 }

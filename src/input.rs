@@ -1,13 +1,13 @@
 //! Input-side prefix key handling.
 //!
-//! zedic's own key bindings live behind a single prefix key (default
+//! ztx's own key bindings live behind a single prefix key (default
 //! `ctrl-]`, 0x1d) so that the wrapped CLI keeps its entire keymap. Pressing
 //! the prefix twice forwards a literal prefix byte to the child.
 
 /// Default prefix key: `ctrl-]`.
 pub const DEFAULT_PREFIX: u8 = 0x1d;
 
-/// A zedic action requested from the keyboard.
+/// A ztx action requested from the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputAction {
     /// `prefix + e`: export the session log as Markdown.
@@ -18,7 +18,7 @@ pub enum InputAction {
     DumpState,
 }
 
-/// Splits the stdin stream into bytes for the child and zedic actions.
+/// Splits the stdin stream into bytes for the child and ztx actions.
 pub struct InputFilter {
     prefix: u8,
     pending: bool,

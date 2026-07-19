@@ -4,7 +4,7 @@ Deliberately terse; module docs in `src/` carry the details.
 
 ## Approach
 
-zedic is a **passive-tap PTY proxy**: child output is forwarded unchanged
+ztx is a **passive-tap PTY proxy**: child output is forwarded unchanged
 (the single exception is OSC 0/2 title handling), while a side channel
 observes the bytes to build state that the features read. Features never
 rewrite the live stream; interactive UI (hint mode) is drawn only on demand
@@ -18,7 +18,7 @@ Zed's native path detection already covers clicking.
 ## Structure
 
 ```
-zedic run -- <agent-cli>
+ztx run -- <agent-cli>
 ┌────────────────────────────────────────────────────────┐
 │ pty        portable-pty child; raw mode; SIGWINCH;     │
 │            signal forwarding; exit-code propagation    │
@@ -60,7 +60,7 @@ output).
   `conversation_summaries.db` and `last_conversations.json`). Schema drift
   must degrade to fallback behavior, never break the wrapper.
 - **The Claude Code plugin is an optional accelerator, not a dependency.**
-  Its hooks call `zedic notify` over the same per-project socket to wake the
+  Its hooks call `ztx notify` over the same per-project socket to wake the
   title thread and report the transcript path. Polling stays authoritative, so
   a missed or absent hook only costs latency — the next poll reconciles. A
   leading NUL distinguishes a control frame from `send`'s paste text, so the
@@ -71,7 +71,7 @@ output).
   plus a panic hook; the managed title is cleared on exit.
 - **Zed config is opt-in.** `setup zed` shows the change, asks, and backs up;
   files with comments are never rewritten automatically.
-- **Logs never touch the terminal** (`ZEDIC_LOG` writes to a file); stray
+- **Logs never touch the terminal** (`ZTX_LOG` writes to a file); stray
   output would corrupt the child's screen.
 
 ## Security notes

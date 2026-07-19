@@ -11,7 +11,7 @@ Zed integrates AI agents two ways:
    inside the agent panel. Every native CLI feature works, but the editor
    integration that ACP sessions enjoy is missing.
 
-zedic targets the second mode: keep 100% of the CLI's native features and
+ztx targets the second mode: keep 100% of the CLI's native features and
 recover the missing integration.
 
 ## Goal
@@ -71,7 +71,7 @@ Verified with Claude Code and antigravity-cli inside Zed Terminal Threads:
       session.
 - [ ] Wrapping a CLI with no adapter (e.g. bash) keeps features 1–3 working
       at fallback quality.
-- [ ] Terminal state is restored even when zedic panics.
+- [ ] Terminal state is restored even when ztx panics.
 - [ ] Idle CPU usage stays below 1%.
 
 The full decision history (interview transcript, ambiguity scoring, ADR) is

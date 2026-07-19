@@ -1,6 +1,6 @@
 // Project tasks configuration. See https://zed.dev/docs/tasks for documentation.
 //
-// Sends the current editor selection into the running `zedic run` session.
+// Sends the current editor selection into the running `ztx run` session.
 //
 // The selection is read from the ZED_* ENVIRONMENT VARIABLES (via
 // `--from-zed-env`), not passed as arguments. Zed runs tasks through
@@ -10,14 +10,14 @@
 // exec` runs those as commands). Reading from the environment avoids this.
 //
 // `command` uses the built binary by absolute path: a Zed task inherits a
-// minimal PATH, so `cargo`/an uninstalled `zedic` are not found, and
+// minimal PATH, so `cargo`/an uninstalled `ztx` are not found, and
 // `cargo run` also needs the crate root as cwd. During development,
 // `cargo build` keeps this debug binary current. Portable alternative:
-// `cargo install --path .` and set "command": "zedic".
+// `cargo install --path .` and set "command": "ztx".
 [
   {
-    "label": "zedic: send selection",
-    "command": "$ZED_WORKTREE_ROOT/target/debug/zedic",
+    "label": "ztx: send selection",
+    "command": "$ZED_WORKTREE_ROOT/target/debug/ztx",
     "args": ["send", "--from-zed-env"],
     "hide": "always",
     "reveal": "never",

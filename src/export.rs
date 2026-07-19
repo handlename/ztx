@@ -122,7 +122,7 @@ pub fn scrollback_to_markdown(shared: &Arc<Mutex<TapShared>>) -> String {
 
 /// The directory holding session exports, shared by the writer and the pruner.
 fn export_dir() -> PathBuf {
-    std::env::temp_dir().join("zedic")
+    std::env::temp_dir().join("ztx")
 }
 
 /// Writes `content` to a timestamped Markdown file in the temp directory and
@@ -195,14 +195,14 @@ fn is_export_file(path: &Path) -> bool {
 
 /// Opens `path` in the user's editor without touching the wrapped terminal.
 ///
-/// Resolution order: `config.toml` `editor`, then `$ZEDIC_EDITOR`, then `zed`,
+/// Resolution order: `config.toml` `editor`, then `$ZTX_EDITOR`, then `zed`,
 /// then `$EDITOR`. GUI editors detach; terminal editors in `$EDITOR` would
 /// fight over the TTY, so output is nulled and failures only logged.
 pub fn open_in_editor(path: &Path, config_editor: Option<&str>) -> io::Result<()> {
     let editor = editor_command(config_editor);
     let (program, args) = editor
         .split_first()
-        .ok_or_else(|| io::Error::other("no editor available (set ZEDIC_EDITOR or EDITOR)"))?;
+        .ok_or_else(|| io::Error::other("no editor available (set ZTX_EDITOR or EDITOR)"))?;
     std::process::Command::new(program)
         .args(args)
         .arg(path)
@@ -224,7 +224,7 @@ pub fn open_location(
     let editor = editor_command(config_editor);
     let (program, args) = editor
         .split_first()
-        .ok_or_else(|| io::Error::other("no editor available (set ZEDIC_EDITOR or EDITOR)"))?;
+        .ok_or_else(|| io::Error::other("no editor available (set ZTX_EDITOR or EDITOR)"))?;
     let mut cmd = std::process::Command::new(program);
     cmd.args(args);
     let is_zed = Path::new(program)
@@ -254,7 +254,7 @@ fn editor_command(config_editor: Option<&str>) -> Vec<String> {
     if let Some(cmd) = config_editor.map(str::trim).filter(|c| !c.is_empty()) {
         return cmd.split_whitespace().map(str::to_owned).collect();
     }
-    if let Ok(cmd) = std::env::var("ZEDIC_EDITOR")
+    if let Ok(cmd) = std::env::var("ZTX_EDITOR")
         && !cmd.is_empty()
     {
         return cmd.split_whitespace().map(str::to_owned).collect();
@@ -387,7 +387,7 @@ mod tests {
     fn stale_exports_missing_dir_is_empty() {
         assert!(
             stale_exports(
-                Path::new("/no/such/zedic/dir"),
+                Path::new("/no/such/ztx/dir"),
                 SystemTime::now(),
                 Duration::from_secs(1)
             )

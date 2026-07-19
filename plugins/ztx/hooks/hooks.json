@@ -5,10 +5,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "zedic",
+            "command": "ztx",
             "args": ["notify", "--from-hook"],
             "timeout": 5,
-            "statusMessage": "zedic: refresh title"
+            "statusMessage": "ztx: refresh title"
           }
         ]
       }
@@ -18,10 +18,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "zedic",
+            "command": "ztx",
             "args": ["notify", "--from-hook"],
             "timeout": 5,
-            "statusMessage": "zedic: refresh title"
+            "statusMessage": "ztx: refresh title"
           }
         ]
       }
@@ -31,10 +31,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "zedic",
+            "command": "ztx",
             "args": ["notify", "--from-hook"],
             "timeout": 5,
-            "statusMessage": "zedic: refresh title"
+            "statusMessage": "ztx: refresh title"
           }
         ]
       }
@@ -44,10 +44,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "zedic",
+            "command": "ztx",
             "args": ["notify", "--from-hook"],
             "timeout": 5,
-            "statusMessage": "zedic: refresh title"
+            "statusMessage": "ztx: refresh title"
           }
         ]
       }

@@ -1,4 +1,4 @@
-//! User configuration file (`~/.config/zedic/config.toml`).
+//! User configuration file (`~/.config/ztx/config.toml`).
 //!
 //! Every setting is optional and only fills in where an explicit CLI argument
 //! is absent: the precedence is **CLI argument > config.toml > built-in
@@ -7,7 +7,7 @@
 //! to its default so a broken config can never stop the wrapper from starting.
 //!
 //! ```toml
-//! prefix = "ctrl-]"       # zedic prefix key (see `parse_prefix`)
+//! prefix = "ctrl-]"       # ztx prefix key (see `parse_prefix`)
 //! editor = "zed --wait"   # editor command for export / hint "open"
 //!
 //! [status_emoji]          # Claude session-title status prefixes
@@ -27,7 +27,7 @@ const DEFAULT_IDLE_EMOJI: &str = "⏳";
 /// Default Claude "waiting" status emoji (mirrors `adapter::claude`).
 const DEFAULT_WAITING_EMOJI: &str = "🔔";
 
-/// Resolved zedic configuration. Fields that map to a CLI-overridable setting
+/// Resolved ztx configuration. Fields that map to a CLI-overridable setting
 /// are `Option`: `None` means "no preference, use the built-in default".
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
@@ -158,15 +158,15 @@ fn parse_prefix(spec: &str) -> Option<u8> {
     (byte != 0).then_some(byte)
 }
 
-/// The config file path: `$XDG_CONFIG_HOME/zedic/config.toml`, falling back to
-/// `~/.config/zedic/config.toml`. `None` when neither is resolvable.
+/// The config file path: `$XDG_CONFIG_HOME/ztx/config.toml`, falling back to
+/// `~/.config/ztx/config.toml`. `None` when neither is resolvable.
 fn config_path() -> Option<PathBuf> {
     let config_home = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))?;
-    Some(config_home.join("zedic").join("config.toml"))
+    Some(config_home.join("ztx").join("config.toml"))
 }
 
 #[cfg(test)]
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn missing_file_yields_defaults() {
         assert_eq!(
-            Config::load_from(Some(PathBuf::from("/no/such/zedic/config.toml"))),
+            Config::load_from(Some(PathBuf::from("/no/such/ztx/config.toml"))),
             Config::default()
         );
         assert_eq!(Config::load_from(None), Config::default());

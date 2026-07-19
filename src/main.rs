@@ -41,7 +41,7 @@ fn main() -> ExitCode {
             match pty::run(&command, opts) {
                 Ok(code) => ExitCode::from(code.min(u8::MAX as u32) as u8),
                 Err(err) => {
-                    eprintln!("zedic: {err}");
+                    eprintln!("ztx: {err}");
                     ExitCode::FAILURE
                 }
             }
@@ -78,7 +78,7 @@ fn report(result: std::io::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("zedic: {err}");
+            eprintln!("ztx: {err}");
             ExitCode::FAILURE
         }
     }
@@ -164,7 +164,7 @@ fn run_notify(
 }
 
 /// The subset of the JSON Claude Code delivers to a hook command on stdin that
-/// zedic uses. Unknown fields (`session_id`, `hook_event_name`, …) are ignored.
+/// ztx uses. Unknown fields (`session_id`, `hook_event_name`, …) are ignored.
 #[derive(serde::Deserialize, Default)]
 struct HookInput {
     cwd: Option<std::path::PathBuf>,
@@ -185,7 +185,7 @@ fn run_sessions() -> std::io::Result<()> {
     let sessions = ipc::list_sessions();
     if sessions.is_empty() {
         println!(
-            "no running zedic sessions ({})",
+            "no running ztx sessions ({})",
             ipc::socket_dir().display()
         );
         return Ok(());

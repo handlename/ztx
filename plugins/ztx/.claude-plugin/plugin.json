@@ -1,0 +1,9 @@
+{
+  "name": "ztx",
+  "version": "0.1.0",
+  "description": "Push session status and transcript path to a running ztx wrapper so Zed terminal titles update instantly and exports find the right transcript.",
+  "author": {
+    "name": "NAGATA Hiroaki"
+  },
+  "homepage": "https://github.com/handlename/ztx"
+}

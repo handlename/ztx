@@ -1,8 +1,8 @@
-//! `zedic setup zed`: merges the selection-sending task and its keybinding
+//! `ztx setup zed`: merges the selection-sending task and its keybinding
 //! into the user's Zed configuration.
 //!
 //! Safety rules (see the plan's risk table): changes are shown first and
-//! applied only after confirmation (or `--yes`), a `.zedic.bak` backup is
+//! applied only after confirmation (or `--yes`), a `.ztx.bak` backup is
 //! written next to each modified file, and files that fail to parse as plain
 //! JSON (Zed allows comments) are never rewritten — the snippet is printed
 //! for manual merging instead.
@@ -14,11 +14,11 @@ use serde_json::{Value, json};
 
 use crate::cli::SetupScope;
 
-const TASK_LABEL: &str = "zedic: send selection";
+const TASK_LABEL: &str = "ztx: send selection";
 const KEY_BINDING: &str = "cmd-alt-z";
 
 fn zed_config_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("ZEDIC_ZED_CONFIG_DIR")
+    if let Ok(dir) = std::env::var("ZTX_ZED_CONFIG_DIR")
         && !dir.is_empty()
     {
         return PathBuf::from(dir);
@@ -41,7 +41,7 @@ fn project_config_dir() -> PathBuf {
 fn task_entry() -> Value {
     json!({
         "label": TASK_LABEL,
-        "command": "zedic",
+        "command": "ztx",
         // `--from-zed-env` reads the selection from the ZED_* environment
         // variables. Passing them as $ZED_* args instead would let Zed's
         // shell re-execute the selected text (it interpolates into a
@@ -61,7 +61,7 @@ fn keymap_entry() -> Value {
     })
 }
 
-/// Entry point for `zedic setup zed`.
+/// Entry point for `ztx setup zed`.
 ///
 /// `scope` selects the destination (global `~/.config/zed/` or project-local
 /// `<worktree>/.zed/`). `preview` shows the changes without writing anything.
@@ -107,7 +107,7 @@ pub fn zed(assume_yes: bool, preview: bool, scope: SetupScope) -> io::Result<()>
             println!(
                 "\nZed keymaps are global-only (no project-local keymap.json). \
                  Add this to ~/.config/zed/keymap.json manually, or run \
-                 `zedic setup zed` with the default --scope global:\n{}\n",
+                 `ztx setup zed` with the default --scope global:\n{}\n",
                 serde_json::to_string_pretty(&keymap_entry())?
             );
         }
@@ -121,7 +121,7 @@ pub fn zed(assume_yes: bool, preview: bool, scope: SetupScope) -> io::Result<()>
          If some path formats in your agent CLI's output are not clickable, \
          extend `terminal.path_hyperlink_regexes` in Zed's settings.json \
          (note: setting it replaces Zed's defaults, so include the patterns \
-         you still want). zedic's hint mode (ctrl-] f) works regardless."
+         you still want). ztx's hint mode (ctrl-] f) works regardless."
     );
 
     if preview {
@@ -129,7 +129,7 @@ pub fn zed(assume_yes: bool, preview: bool, scope: SetupScope) -> io::Result<()>
     } else {
         println!(
             "\nDone. In Zed, select text and press {KEY_BINDING} to send the \
-             selection into the running zedic session."
+             selection into the running ztx session."
         );
     }
     Ok(())
@@ -165,7 +165,7 @@ fn merge_array_file(
 
     if items.iter().any(&already_present) {
         println!(
-            "{}: zedic entry already present, skipping",
+            "{}: ztx entry already present, skipping",
             path.display()
         );
         return Ok(());
@@ -183,7 +183,7 @@ fn merge_array_file(
     }
 
     if path.exists() {
-        std::fs::copy(path, path.with_extension("json.zedic.bak"))?;
+        std::fs::copy(path, path.with_extension("json.ztx.bak"))?;
     }
     items.push(entry);
     std::fs::write(path, serde_json::to_string_pretty(&Value::Array(items))?)?;
@@ -210,9 +210,9 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         // SAFETY: guarded by ENV_LOCK; tests in this module run one at a time.
-        unsafe { std::env::set_var("ZEDIC_ZED_CONFIG_DIR", dir.path()) };
+        unsafe { std::env::set_var("ZTX_ZED_CONFIG_DIR", dir.path()) };
         let result = test(dir.path());
-        unsafe { std::env::remove_var("ZEDIC_ZED_CONFIG_DIR") };
+        unsafe { std::env::remove_var("ZTX_ZED_CONFIG_DIR") };
         result
     }
 
@@ -255,7 +255,7 @@ mod tests {
                     .unwrap();
             assert_eq!(tasks.as_array().unwrap().len(), 2);
             assert_eq!(tasks[0]["label"], "user task");
-            assert!(dir.join("tasks.json.zedic.bak").exists());
+            assert!(dir.join("tasks.json.ztx.bak").exists());
         });
     }
 
