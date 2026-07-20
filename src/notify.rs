@@ -10,17 +10,23 @@ use std::path::Path;
 
 /// Emits a desktop notification for `event`, if the event warrants user
 /// attention and the platform supports it. `sound` is a Sound-Preferences name
-/// (`None` is silent).
-pub fn desktop(event: &str, cwd: Option<&Path>, message: Option<&str>, sound: Option<&str>) {
+/// (`None` is silent); `emoji` supplies the status prefix for the subtitle.
+pub fn desktop(
+    event: &str,
+    cwd: Option<&Path>,
+    message: Option<&str>,
+    sound: Option<&str>,
+    emoji: &crate::config::StatusEmoji,
+) {
     #[cfg(target_os = "macos")]
     {
-        if let Some(subtitle) = event_subtitle(event) {
+        if let Some(subtitle) = subtitle_for(event, emoji) {
             let cwd = cwd.unwrap_or_else(|| Path::new("."));
-            macos::emit(subtitle, event, cwd, message, sound);
+            macos::emit(&subtitle, event, cwd, message, sound);
         }
     }
     #[cfg(not(target_os = "macos"))]
-    let _ = (event, cwd, message, sound);
+    let _ = (event, cwd, message, sound, emoji);
 }
 
 /// Maps a hook event to the notification subtitle, or `None` for events that
@@ -33,6 +39,24 @@ fn event_subtitle(event: &str) -> Option<&'static str> {
         "Stop" => Some("Finished"),
         _ => None,
     }
+}
+
+/// The subtitle with the matching status emoji prefixed (mirroring the terminal
+/// title's status prefix): `waiting` for `Notification`, `idle` for `Stop`. An
+/// emoji configured to an empty string yields the bare subtitle. `None` for
+/// events that should not notify.
+fn subtitle_for(event: &str, emoji: &crate::config::StatusEmoji) -> Option<String> {
+    let base = event_subtitle(event)?;
+    let prefix = match event {
+        "Notification" => emoji.waiting.as_str(),
+        "Stop" => emoji.idle.as_str(),
+        _ => "",
+    };
+    Some(if prefix.is_empty() {
+        base.to_owned()
+    } else {
+        format!("{prefix} {base}")
+    })
 }
 
 /// The notification title: `<repo>/<session>` (e.g. `ztx/push-notification`),
@@ -173,6 +197,34 @@ mod tests {
         assert_eq!(event_subtitle("SessionStart"), None);
         assert_eq!(event_subtitle("UserPromptSubmit"), None);
         assert_eq!(event_subtitle(""), None);
+    }
+
+    #[test]
+    fn subtitle_prefixes_the_matching_status_emoji() {
+        let emoji = crate::config::StatusEmoji {
+            busy: "B".into(),
+            idle: "I".into(),
+            waiting: "W".into(),
+        };
+        assert_eq!(
+            subtitle_for("Notification", &emoji).as_deref(),
+            Some("W Waiting for input")
+        );
+        assert_eq!(subtitle_for("Stop", &emoji).as_deref(), Some("I Finished"));
+        assert_eq!(subtitle_for("SessionStart", &emoji), None);
+    }
+
+    #[test]
+    fn subtitle_omits_prefix_for_empty_emoji() {
+        let emoji = crate::config::StatusEmoji {
+            busy: String::new(),
+            idle: String::new(),
+            waiting: String::new(),
+        };
+        assert_eq!(
+            subtitle_for("Notification", &emoji).as_deref(),
+            Some("Waiting for input")
+        );
     }
 
     #[test]

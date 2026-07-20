@@ -69,6 +69,7 @@ fn main() -> ExitCode {
             transcript,
             socket,
             config.notify,
+            config.status_emoji,
         )),
         cli::Command::Sessions => report(run_sessions()),
         cli::Command::Setup { target } => match target {
@@ -123,6 +124,7 @@ fn run_notify(
     transcript: Option<std::path::PathBuf>,
     socket: Option<std::path::PathBuf>,
     notify_cfg: config::NotifyConfig,
+    status_emoji: config::StatusEmoji,
 ) -> std::io::Result<()> {
     let mut controls: Vec<ipc::Control> = Vec::new();
     let mut hook_cwd: Option<std::path::PathBuf> = None;
@@ -186,6 +188,7 @@ fn run_notify(
             hook_cwd.as_deref(),
             message.as_deref(),
             notify_cfg.sound.as_deref(),
+            &status_emoji,
         );
     }
     Ok(())
