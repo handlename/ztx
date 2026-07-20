@@ -188,7 +188,7 @@ fn project_slug(cwd: &Path) -> String {
 
 /// Derives the title body from `cwd`: the worktree name for a worktree
 /// checkout, otherwise the git branch, otherwise the directory basename.
-fn derive_title(cwd: &Path) -> String {
+pub(crate) fn derive_title(cwd: &Path) -> String {
     worktree_name(cwd)
         .or_else(|| git_branch(cwd))
         .unwrap_or_else(|| basename(cwd))

@@ -7,6 +7,7 @@ mod hint;
 mod input;
 mod ipc;
 mod logging;
+mod notify;
 mod pty;
 mod setup;
 mod term;
@@ -62,7 +63,13 @@ fn main() -> ExitCode {
             wake,
             transcript,
             socket,
-        } => report(run_notify(from_hook, wake, transcript, socket)),
+        } => report(run_notify(
+            from_hook,
+            wake,
+            transcript,
+            socket,
+            config.notify,
+        )),
         cli::Command::Sessions => report(run_sessions()),
         cli::Command::Setup { target } => match target {
             cli::SetupTarget::Zed {
@@ -115,9 +122,13 @@ fn run_notify(
     wake: bool,
     transcript: Option<std::path::PathBuf>,
     socket: Option<std::path::PathBuf>,
+    notify_cfg: config::NotifyConfig,
 ) -> std::io::Result<()> {
     let mut controls: Vec<ipc::Control> = Vec::new();
     let mut hook_cwd: Option<std::path::PathBuf> = None;
+    // Carries the hook event + message so a desktop notification can fire once
+    // we confirm a live session below.
+    let mut hook_event: Option<(String, Option<String>)> = None;
 
     if from_hook {
         let hook = read_hook_input()?;
@@ -128,6 +139,9 @@ fn run_notify(
         controls.push(ipc::Control::Wake);
         if let Some(path) = hook.transcript_path {
             controls.push(ipc::Control::Transcript { path });
+        }
+        if let Some(event) = hook.hook_event_name {
+            hook_event = Some((event, hook.message));
         }
     }
     if wake {
@@ -144,7 +158,7 @@ fn run_notify(
 
     // Best-effort: with no live session this is a silent no-op, so a plugin
     // hook never fails the agent.
-    let Some(target) = ipc::notify_target(hook_cwd, socket) else {
+    let Some(target) = ipc::notify_target(hook_cwd.clone(), socket) else {
         tracing::debug!("no live session for this project; notify skipped");
         return Ok(());
     };
@@ -160,15 +174,33 @@ fn run_notify(
             tracing::warn!(error = %err, "failed to send notify control frame");
         }
     }
+
+    // A live session exists, so this is a real ztx-wrapped run: surface a
+    // desktop notification for attention-worthy events. Best-effort and fully
+    // independent of the title refresh above.
+    if notify_cfg.desktop
+        && let Some((event, message)) = hook_event
+    {
+        notify::desktop(
+            &event,
+            hook_cwd.as_deref(),
+            message.as_deref(),
+            notify_cfg.sound.as_deref(),
+        );
+    }
     Ok(())
 }
 
 /// The subset of the JSON Claude Code delivers to a hook command on stdin that
-/// ztx uses. Unknown fields (`session_id`, `hook_event_name`, …) are ignored.
+/// ztx uses. Other fields (`session_id`, …) are ignored.
 #[derive(serde::Deserialize, Default)]
 struct HookInput {
     cwd: Option<std::path::PathBuf>,
     transcript_path: Option<std::path::PathBuf>,
+    /// The hook event (`Notification`, `Stop`, …); drives desktop notifications.
+    hook_event_name: Option<String>,
+    /// Human-readable message Claude Code supplies for `Notification` events.
+    message: Option<String>,
 }
 
 /// Reads and parses the hook JSON from stdin. Best-effort: an empty or

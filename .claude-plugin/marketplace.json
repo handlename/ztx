@@ -7,7 +7,7 @@
     {
       "name": "ztx",
       "source": "./plugins/ztx",
-      "description": "Push session status and transcript path to a running ztx wrapper so Zed terminal titles update instantly and exports find the right transcript."
+      "description": "Push session status and transcript path to a running ztx wrapper so Zed terminal titles update instantly, exports find the right transcript, and macOS desktop notifications fire when the session waits for input or finishes."
     }
   ]
 }

@@ -11,6 +11,9 @@ use std::path::Path;
 
 pub use antigravity::AntigravityAdapter;
 pub use claude::ClaudeCodeAdapter;
+/// Session label derived from `cwd` (worktree name / branch / basename),
+/// reused by desktop notifications so they match the terminal thread title.
+pub(crate) use claude::derive_title;
 
 /// Which adapter to use for the wrapped CLI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
