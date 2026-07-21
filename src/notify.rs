@@ -33,6 +33,10 @@ pub fn desktop(
 /// should not raise a desktop notification. This is the single gate on which
 /// events notify: `Notification` (Claude wants input) and `Stop` (Claude
 /// finished); everything else (SessionStart, UserPromptSubmit, …) is ignored.
+// Only the macOS path and the tests call these pure helpers, so on other
+// targets they are unused by the (non-test) build; allow that rather than
+// gate them off, keeping them testable everywhere.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn event_subtitle(event: &str) -> Option<&'static str> {
     match event {
         "Notification" => Some("Waiting for input"),
@@ -45,6 +49,7 @@ fn event_subtitle(event: &str) -> Option<&'static str> {
 /// title's status prefix): `waiting` for `Notification`, `idle` for `Stop`. An
 /// emoji configured to an empty string yields the bare subtitle. `None` for
 /// events that should not notify.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn subtitle_for(event: &str, emoji: &crate::config::StatusEmoji) -> Option<String> {
     let base = event_subtitle(event)?;
     let prefix = match event {
@@ -62,6 +67,7 @@ fn subtitle_for(event: &str, emoji: &crate::config::StatusEmoji) -> Option<Strin
 /// The notification title: `<repo>/<session>` (e.g. `ztx/push-notification`),
 /// where the session label is the same one ztx shows in the terminal thread.
 /// The repo segment is dropped when it would merely repeat the label.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn session_label(cwd: &Path) -> String {
     let name = crate::adapter::derive_title(cwd);
     match cwd.file_name().map(|n| n.to_string_lossy().into_owned()) {
@@ -72,6 +78,7 @@ fn session_label(cwd: &Path) -> String {
 
 /// Wraps `s` in single quotes for a POSIX `sh -c` command line (used by
 /// `terminal-notifier -execute`), escaping any embedded single quotes.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
