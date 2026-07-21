@@ -120,6 +120,22 @@ The hooks run `ztx notify --from-hook`, which is a silent no-op unless a
 ztx session is running in the same project — so it never interferes with a
 plain `claude` started outside ztx. `ztx` must be on your `PATH`.
 
+#### Desktop notifications (macOS)
+
+With the plugin installed, ztx also raises a macOS desktop notification when
+the session **waits for input** or **finishes** responding. The notification is
+titled with the session (`<repo>/<worktree>`), carries the Zed icon, and
+**clicking it focuses that worktree's Zed workspace**.
+
+This needs [`terminal-notifier`](https://github.com/julienXX/terminal-notifier)
+on your `PATH` (`brew install terminal-notifier`). It is strictly additive and
+best-effort: when `terminal-notifier` is absent — or the host is not macOS, or
+no ztx session is live — the desktop notification is simply skipped and every
+other behavior (title refresh, transcript hand-off) is unaffected. Set the
+notification style to *Banner* (System Settings → Notifications →
+terminal-notifier) so notifications auto-dismiss; disable the feature or change
+the sound via `[notify]` in `config.toml`.
+
 ## Configuration
 
 ### Configuration file
@@ -137,6 +153,10 @@ editor = "zed"           # editor for exports / hint "open" (split on spaces)
 busy = "🔄"
 idle = "⏳"
 waiting = "🔔"           # Claude is waiting for user input (choices, prompts)
+
+[notify]                 # macOS desktop notifications (needs terminal-notifier)
+desktop = true           # fire on waiting/finished; false disables
+sound = "Glass"          # sound name (see Sound Preferences); "" for silent
 ```
 
 ### Environment variables

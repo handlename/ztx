@@ -14,6 +14,10 @@
 //! busy = "🔄"
 //! idle = "⏳"
 //! waiting = "🔔"          # Claude is waiting for user input (choices, prompts)
+//!
+//! [notify]                # macOS desktop notifications (via terminal-notifier)
+//! desktop = true          # fire on waiting/finished; needs terminal-notifier
+//! sound = "Glass"         # notification sound name; "" for silent
 //! ```
 
 use std::path::PathBuf;
@@ -37,6 +41,29 @@ pub struct Config {
     pub editor: Option<String>,
     /// Status-emoji prefixes for the managed session title.
     pub status_emoji: StatusEmoji,
+    /// Desktop-notification behavior for hook events.
+    pub notify: NotifyConfig,
+}
+
+/// macOS desktop-notification settings. Enabled by default so that installing
+/// the plugin is enough to get notifications; `terminal-notifier` is still
+/// required at runtime and its absence is a silent no-op.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotifyConfig {
+    /// Whether to emit a desktop notification when the session starts waiting
+    /// for input or finishes responding.
+    pub desktop: bool,
+    /// Notification sound name (as in Sound Preferences). `None` is silent.
+    pub sound: Option<String>,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            desktop: true,
+            sound: Some("Glass".to_owned()),
+        }
+    }
 }
 
 /// The busy/idle/waiting emoji prefixes used by the Claude adapter's title.
@@ -113,10 +140,22 @@ impl Config {
             }
         }
 
+        let mut notify = NotifyConfig::default();
+        if let Some(raw_notify) = raw.notify {
+            if let Some(desktop) = raw_notify.desktop {
+                notify.desktop = desktop;
+            }
+            // An explicit empty string means "silent"; otherwise keep the value.
+            if let Some(sound) = raw_notify.sound {
+                notify.sound = (!sound.trim().is_empty()).then_some(sound);
+            }
+        }
+
         Self {
             prefix,
             editor,
             status_emoji,
+            notify,
         }
     }
 }
@@ -127,6 +166,7 @@ struct RawConfig {
     prefix: Option<String>,
     editor: Option<String>,
     status_emoji: Option<RawStatusEmoji>,
+    notify: Option<RawNotify>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -134,6 +174,12 @@ struct RawStatusEmoji {
     busy: Option<String>,
     idle: Option<String>,
     waiting: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawNotify {
+    desktop: Option<bool>,
+    sound: Option<String>,
 }
 
 /// Parses a prefix-key spec into its control byte. Only the `ctrl-<key>` form
@@ -212,6 +258,27 @@ mod tests {
         assert_eq!(cfg.status_emoji.busy, "X");
         assert_eq!(cfg.status_emoji.idle, DEFAULT_IDLE_EMOJI);
         assert_eq!(cfg.status_emoji.waiting, DEFAULT_WAITING_EMOJI);
+    }
+
+    #[test]
+    fn notify_defaults_to_enabled_with_sound() {
+        assert_eq!(Config::parse("").notify, NotifyConfig::default());
+        assert!(Config::parse("").notify.desktop);
+        assert_eq!(Config::parse("").notify.sound.as_deref(), Some("Glass"));
+    }
+
+    #[test]
+    fn notify_can_be_disabled_and_silenced() {
+        let cfg = Config::parse("[notify]\ndesktop = false\nsound = \"\"\n");
+        assert!(!cfg.notify.desktop);
+        assert_eq!(cfg.notify.sound, None);
+    }
+
+    #[test]
+    fn notify_custom_sound_is_kept() {
+        let cfg = Config::parse("[notify]\nsound = \"Ping\"\n");
+        assert!(cfg.notify.desktop);
+        assert_eq!(cfg.notify.sound.as_deref(), Some("Ping"));
     }
 
     #[test]
