@@ -1,8 +1,12 @@
 use clap::{Parser, Subcommand};
 
+/// Version string combining the crate version with the git commit hash
+/// captured at build time (see build.rs), e.g. `0.1.0 (a1b2c3d)`.
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("ZTX_GIT_HASH"), ")");
+
 /// Mediator between Zed terminal sessions and AI agent CLIs.
 #[derive(Parser)]
-#[command(name = "ztx", version, about)]
+#[command(name = "ztx", version = VERSION, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
