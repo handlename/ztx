@@ -1,5 +1,12 @@
 /target
 
+# mdBook build output
+docs/*/book/
+
+# Local docs preview scratch (see docs verification steps)
+/_site/
+/_ghpages/
+
 # Agent working files (not part of the product)
 /.omc/
 /.claude/
