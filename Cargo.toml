@@ -6,6 +6,22 @@ rust-version = "1.96"
 description = "Mediator between Zed terminal sessions and AI agent CLIs"
 repository = "https://github.com/handlename/ztx"
 license = "MIT"
+readme = "README.md"
+keywords = ["zed", "terminal", "ai", "cli", "agent"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+    ".github/",
+    ".zed/",
+    ".claude-plugin/",
+    "plugins/",
+    ".tagpr",
+    "mise.toml",
+    "rust-toolchain.toml",
+    "AGENTS.md",
+    "DESIGN.md",
+    "GLOSSARY.md",
+    "REQUIREMENTS.md",
+]
 
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
