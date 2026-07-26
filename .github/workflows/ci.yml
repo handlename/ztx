@@ -22,3 +22,15 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test --all-targets
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: peaceiris/actions-mdbook@948b432f0fddb61de0806565a7222b36e12e2ee3 # v2.0.0
+        with:
+          mdbook-version: '0.5.4'
+      - name: Build EN
+        run: mdbook build docs/en
+      - name: Build JA
+        run: mdbook build docs/ja

@@ -1,0 +1,60 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# Least privilege: only `deploy` may write to Pages or mint an OIDC token.
+# Declaring any permissions block sets every unlisted scope to none, so
+# `contents: read` must be explicit for checkout.
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  # Never cancel a running Pages deployment: a half-applied deploy would leave
+  # the published site in an inconsistent state.
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # actions/configure-pages reads the repository's Pages configuration.
+      pages: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: peaceiris/actions-mdbook@948b432f0fddb61de0806565a7222b36e12e2ee3 # v2.0.0
+        with:
+          mdbook-version: '0.5.4'
+      - name: Build EN
+        run: mdbook build docs/en
+      - name: Build JA
+        run: mdbook build docs/ja
+      - name: Compose site (EN=root, JA=ja/)
+        run: |
+          mkdir -p _site
+          cp -r docs/en/book/* _site/
+          cp -r docs/ja/book _site/ja
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

@@ -1,0 +1,15 @@
+[book]
+title = "ztx マニュアル"
+language = "ja"
+authors = ["NAGATA Hiroaki"]
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/handlename/ztx"
+# Served from a project subpath on GitHub Pages. Without this, the generated
+# 404 page resolves its links and assets against the domain root and breaks.
+site-url = "/ztx/ja/"

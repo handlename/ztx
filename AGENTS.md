@@ -5,8 +5,14 @@ Guidance for AI agents (and humans) working on this repository.
 ## Project
 
 ztx — a Rust PTY-proxy wrapper improving the fit between Zed terminal
-sessions and AI agent CLIs. Read `README.md` (usage), `DESIGN.md`
+sessions and AI agent CLIs. Read `README.md` (overview), `DESIGN.md`
 (architecture), `REQUIREMENTS.md` (scope), `GLOSSARY.md` (terms) first.
+
+User-facing usage lives in the manual under `docs/` (mdBook; `docs/en` is the
+source of truth, `docs/ja` follows), published at
+<https://handlename.github.io/ztx/>. When a change alters user-visible
+behavior — a flag, a config key, a key binding — update `docs/en` in the same
+change; `docs/ja` may follow later.
 
 ## Build, test, lint
 
@@ -21,6 +27,17 @@ cargo fmt --all --check                     # CI-enforced
 ```
 
 All three must pass before a change is considered done.
+
+For the manual:
+
+```sh
+mise run docs          # serve docs/en with live reload (mise run docs ja for JA)
+```
+
+This serves one book at `/`, so a Japanese page's link to its English
+counterpart silently lands on the wrong page. Cross-language links and the 404
+page only resolve under the `/ztx/` subpath Pages serves from, so check those on
+the deployed site rather than locally.
 
 ## Version control
 

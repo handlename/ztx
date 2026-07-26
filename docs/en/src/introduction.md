@@ -1,4 +1,6 @@
-# ztx
+# Introduction
+
+> 日本語版: [ztx マニュアル](ja/introduction.html)
 
 **ztx** (Zed / Terminal session / eXchange) is a PTY-proxy wrapper that makes AI agent CLIs
 — Claude Code, antigravity-cli, and others — feel at home inside Zed's
@@ -15,34 +17,19 @@ them:
 | **Open the session log as Markdown** | `ctrl-] e` (or `ztx export`) converts the session transcript to Markdown and opens it in the editor |
 | **Send editor selections into the session** | `ztx send` (bound to `cmd-alt-z` by `ztx setup zed`) injects `file:line` references and selected text into the running CLI |
 
-## Installation
+## Where to go next
 
-Download a binary from [releases](https://github.com/handlename/ztx/releases),
-or build from source:
+- New to ztx? Start with [Installation](getting-started/installation.md), then
+  [Your first session](getting-started/first-session.md).
+- Using Zed? [Zed setup](getting-started/zed-setup.md) wires up the task and keybinding.
+- Looking for a specific feature? See the [Guide](guide/session-names.md).
+- Looking up a flag or a config key? See the [Reference](reference/subcommands.md).
+- Something not working? See [Troubleshooting](troubleshooting.md).
 
-```sh
-cargo install --path .
-```
+## How it works, briefly
 
-## Quick start
-
-```sh
-ztx run -- claude        # wrap an agent CLI (adapter auto-detected)
-ztx setup zed            # install the Zed task + keybinding, once
-```
-
-## Documentation
-
-- **[User Manual (English)](https://handlename.github.io/ztx/)**
-- **[ユーザーマニュアル (日本語)](https://handlename.github.io/ztx/ja/)**
-
-The manual covers installation, every feature, the full CLI and configuration
-reference, and troubleshooting.
-
-For contributors: [DESIGN.md](DESIGN.md) (architecture),
-[REQUIREMENTS.md](REQUIREMENTS.md) (requirements), and
-[GLOSSARY.md](GLOSSARY.md) (terminology).
-
-## License
-
-[MIT](LICENSE)
+ztx is a **passive-tap PTY proxy**: it owns a pseudo-terminal, runs the agent
+CLI inside it, and relays bytes both ways unchanged — the single exception is
+OSC 0/2 title handling. A side channel observes those bytes to build the state
+that the features read, so ztx never rewrites the live stream. See
+[Architecture](appendix/architecture.md) for the full design.
