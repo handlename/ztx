@@ -42,7 +42,6 @@ Claude Code and antigravity-cli.
   codes, and extended keyboard protocols must pass through unchanged; idle
   CPU stays below 1%.
 - Implementation language: Rust. Documentation and code comments: English.
-- Version control: git, one commit per implementation step, GPG-signed.
 
 ## Non-goals (v1)
 
@@ -61,20 +60,25 @@ Claude Code and antigravity-cli.
 
 ## Acceptance criteria
 
-Verified with Claude Code and antigravity-cli inside Zed Terminal Threads:
+The bar v1 was built against, exercised with Claude Code and antigravity-cli
+inside Zed Terminal Threads:
 
-- [ ] A wrapped CLI is indistinguishable from the bare CLI in daily use
-      (raw mode, resize, signals, exit codes, Shift+Enter / kitty protocol).
-- [ ] Feature 1: the session name follows the session's activity
-      (adapter quality) or the child's own titles (fallback).
-- [ ] Feature 2a: cmd+click opens logged file paths at the right line.
-- [ ] Feature 2b: hint mode opens logged file paths without the mouse.
-- [ ] Feature 3: one action exports the log as Markdown into the editor
-      (structured via adapter transcript; capture fallback otherwise).
-- [ ] Wrapping a CLI with no adapter (e.g. bash) keeps features 1–3 working
-      at fallback quality.
-- [ ] Terminal state is restored even when ztx panics.
-- [ ] Idle CPU usage stays below 1%.
+- A wrapped CLI is indistinguishable from the bare CLI in daily use
+  (raw mode, resize, signals, exit codes, Shift+Enter / kitty protocol).
+- Feature 1: the session name follows the session's activity
+  (adapter quality) or the child's own titles (fallback).
+- Feature 2a: cmd+click opens logged file paths at the right line.
+- Feature 2b: hint mode opens logged file paths without the mouse.
+- Feature 3: one action exports the log as Markdown into the editor
+  (structured via adapter transcript; capture fallback otherwise).
+- Wrapping a CLI with no adapter (e.g. bash) keeps features 1–3 working
+  at fallback quality.
+- Terminal state is restored even when ztx panics.
+- Idle CPU usage stays below 1%.
 
-The full decision history (interview transcript, ambiguity scoring, ADR) is
-kept in the planning documents outside this repository.
+Interactive criteria are held up by the author's day-to-day use rather than by
+an automated conformance suite; see the alpha-quality caveats in the README.
+
+The decision history behind these requirements (interview transcript,
+ambiguity scoring, ADR) lives in the author's private planning notes and is
+not published.

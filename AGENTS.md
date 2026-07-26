@@ -44,8 +44,8 @@ the deployed site rather than locally.
 - One logical change per commit.
 - Commit messages: English, Conventional Commits (`feat:`, `fix:`, `chore:`,
   `docs:`).
-- Commits are GPG-signed via 1Password; if signing fails, stop and ask the
-  user to unlock 1Password.
+- Commits are GPG-signed. If signing fails, stop and ask the user rather than
+  committing unsigned.
 - Run `cargo fmt --all` before every commit — unformatted code fails the
   CI-enforced `cargo fmt --all --check`.
 
@@ -62,14 +62,15 @@ the deployed site rather than locally.
 
 ## Testing notes
 
-- Interactive behavior is tested with `/usr/bin/expect` driving the real
-  binary (see the PTY passthrough and hint-mode checks in the history).
-  Beware Tcl's `\x` escape: `send "\x1de"` sends U+01DE, not `ctrl-]` + `e`;
-  split into two `send` calls.
+- `cargo test` covers the unit level. Interactive behavior (PTY passthrough,
+  hint mode) has no committed harness — check it ad hoc with `/usr/bin/expect`
+  driving the real binary. Beware Tcl's `\x` escape: `send "\x1de"` sends
+  U+01DE, not `ctrl-]` + `e`; split into two `send` calls.
 - `ZTX_RUNTIME_DIR`, `ZTX_ZED_CONFIG_DIR`, `ZTX_EDITOR`, and
   `ZTX_LOG_FILE` exist so tests never touch real user state.
-- Verify features against real data when possible (a real Claude Code
-  transcript exists for this repo's cwd).
+- Verify features against real data when possible — e.g. a Claude Code
+  transcript under `~/.claude/projects/` for the checkout you are working in,
+  when one exists.
 
 ## Release
 

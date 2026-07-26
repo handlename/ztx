@@ -51,7 +51,7 @@ ztx run -- claude        # wrap an agent CLI (adapter auto-detected)
 The manual covers installation, every feature, the full CLI and configuration
 reference, and troubleshooting.
 
-For contributors: [DESIGN.md](DESIGN.md) (architecture),
+For reading the code: [DESIGN.md](DESIGN.md) (architecture),
 [REQUIREMENTS.md](REQUIREMENTS.md) (requirements), and
 [GLOSSARY.md](GLOSSARY.md) (terminology).
 
