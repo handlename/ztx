@@ -14,6 +14,17 @@ source of truth, `docs/ja` follows), published at
 behavior — a flag, a config key, a key binding — update `docs/en` in the same
 change; `docs/ja` may follow later.
 
+`README.md` (English) is the source of truth for the overview; `README.ja.md`
+is its Japanese counterpart. Unlike `docs/ja`, translate in the **same change**
+— never leave the Japanese README behind. The two are short, they are the front
+door of the repository, and drift there misinforms whoever arrives first. A
+change that edits one and not the other is incomplete.
+
+Both files carry a link to the other directly under the status block
+(`> 日本語版: …` / `> English version: …`); keep it there. Their in-page anchor
+links differ by language (`#feature-lifecycle` vs `#機能のライフサイクル`), so
+check those after renaming a heading.
+
 ## Build, test, lint
 
 Rust is provisioned via mise (`mise.toml`); prefix commands with
@@ -51,7 +62,8 @@ the deployed site rather than locally.
 
 ## Conventions
 
-- Documentation and code comments are **English**.
+- Documentation and code comments are **English**. The only exceptions are the
+  files that exist to be Japanese: `README.ja.md` and `docs/ja/`.
 - Comments explain constraints the code cannot show; no redundant narration.
 - Module-level `//!` docs carry the design context for each module.
 - Undocumented external state (Claude Code / agy files) must be read

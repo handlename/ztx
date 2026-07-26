@@ -15,6 +15,8 @@
 >   useful to someone else. Issues are read, but a reply, a fix, or a merged
 >   pull request is not promised.
 
+> 日本語版: [README.ja.md](README.ja.md)
+
 **ztx** (Zed / Terminal session / eXchange) is a PTY-proxy wrapper that makes AI agent CLIs
 — Claude Code, antigravity-cli, and others — feel at home inside Zed's
 terminal sessions (Terminal Threads in the agent panel).
