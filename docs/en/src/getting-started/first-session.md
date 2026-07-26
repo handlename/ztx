@@ -77,7 +77,7 @@ See [Export the session log](../guide/export-log.md) for more.
 
 ## What's next
 
-- [Zed setup](zed-setup.md) — wire up `cmd-alt-z` to send editor selections
-  into the running session.
+- [Zed setup](zed-setup.md) — wrap every Terminal Thread automatically with
+  `terminal_init_command`.
 - [Key bindings](../reference/key-bindings.md) — the full list of `ctrl-]`
   actions and how to change the prefix key.

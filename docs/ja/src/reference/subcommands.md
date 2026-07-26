@@ -1,6 +1,6 @@
 # サブコマンド
 
-ztx は 6 つのサブコマンドを提供します。永続的な設定はすべて
+ztx は 4 つのサブコマンドを提供します。永続的な設定はすべて
 [`config.toml`](configuration.md) で管理します。以下のフラグは 1 回の実行にのみ適用されます。
 
 ---
@@ -61,38 +61,6 @@ ztx export --stdout | pbcopy
 
 ---
 
-## `ztx send`
-
-実行中の ztx セッションにファイル参照、行番号、または選択テキストを送信します。メッセージはブラケットペースト (bracketed paste) として注入されるため、Agent CLI は単一ユニットとして受け取ります。Zed タスクから呼び出すことを想定しています（`ztx setup zed` 参照）。
-
-```sh
-ztx send [OPTIONS] [message...]
-```
-
-| フラグ | 値 | デフォルト | 説明 |
-|------|--------|---------|-------------|
-| `--from-zed-env` | — | オフ | 明示的なフラグの代わりに、`ZED_RELATIVE_FILE`、`ZED_ROW`、`ZED_SELECTED_TEXT` 環境変数からファイル・行・選択テキストを読み取ります。`$ZED_*` 補間によるシェルインジェクションを避けるため、Zed タスクでの使用が推奨されます。 |
-| `--file` | パス文字列 | — | メッセージに含めるファイルパス。 |
-| `--line` | 整数 | — | ファイル参照に付加する行番号。 |
-| `--text` | 文字列 | — | フェンスコードブロックとして付加する選択テキスト。 |
-| `--socket` | パス | プロジェクトソケット | Unix ソケットパスで特定のセッションを指定します。このフラグなしの場合、ztx はプロジェクトディレクトリが `ZED_WORKTREE_ROOT`（またはカレントディレクトリ）と一致するセッションにルーティングします。 |
-| `message` | 位置引数、複数ワード可 | — | ファイル・テキストコンテキストの後に追加される自由形式のメッセージテキスト。 |
-
-### 使用例
-
-```sh
-# 現在の Zed 選択を注入します（setup zed でインストールされた Zed タスクから呼び出されます）。
-ztx send --from-zed-env
-
-# 明示的な参照を注入します。
-ztx send --file src/main.rs --line 42 --text "this panics on empty input"
-
-# 特定のセッションを指定します。
-ztx send --socket ~/.local/share/ztx/abc123.sock "please review this"
-```
-
----
-
 ## `ztx notify`
 
 実行中のセッションにアクティビティの変化を通知します。Claude Code プラグインフックで使用されます。同じプロジェクトで ztx セッションが実行されていない場合は何も行いません。
@@ -136,35 +104,6 @@ ztx sessions
 ```
 12345  /tmp/ztx/abc123.sock  /home/user/myproject
 67890  /tmp/ztx/def456.sock  /home/user/otherproject
-```
-
----
-
-## `ztx setup zed`
-
-ztx のタスクとキーバインドを生成して Zed の設定にマージします。ztx のインストール後に一度実行してください。ファイルを書き込む前に確認を求め、バックアップを作成します。
-
-```sh
-ztx setup zed [OPTIONS]
-```
-
-| フラグ | 値 | デフォルト | 説明 |
-|------|--------|---------|-------------|
-| `--yes` | — | オフ | 確認なしで変更を適用します。 |
-| `--preview` | — | オフ | ファイルを書き込まずに変更内容のプレビューを表示します。 |
-| `--scope` | `global` \| `project` | `global` | Zed 設定の書き込み先。`global` は `~/.config/zed/` に書き込みます。`project` は `<worktree>/.zed/` に書き込みます（`ZED_WORKTREE_ROOT` を起点とし、未設定の場合はカレントディレクトリ）。Zed はプロジェクトローカルのキーマップをサポートしないため、project スコープではタスクのみ書き込み、キーバインドは手動追加のために表示されます。 |
-
-### 使用例
-
-```sh
-# グローバルな Zed 設定へのインタラクティブインストール。
-ztx setup zed
-
-# ファイルを書き込まずに変更内容をプレビューします。
-ztx setup zed --preview
-
-# 現在のプロジェクトの .zed ディレクトリへの非インタラクティブインストール。
-ztx setup zed --scope project --yes
 ```
 
 > このページの英語版: [Subcommands](../../reference/subcommands.html)

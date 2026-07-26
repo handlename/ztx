@@ -13,7 +13,6 @@ them:
 | **Session names that follow the work** | ztx injects OSC titles, so the thread name in the agent panel shows what the session is doing (via CLI-specific adapters) |
 | **Open files from the log** | `ctrl-] f` overlays hint labels on file paths in the recent output; picking one opens `zed <path>:<line>`. cmd+click works via Zed's built-in path detection |
 | **Open the session log as Markdown** | `ctrl-] e` (or `ztx export`) converts the session transcript to Markdown and opens it in the editor |
-| **Send editor selections into the session** | `ztx send` (bound to `cmd-alt-z` by `ztx setup zed`) injects `file:line` references and selected text into the running CLI |
 
 ## Installation
 
@@ -28,7 +27,6 @@ cargo install --path .
 
 ```sh
 ztx run -- claude        # wrap an agent CLI (adapter auto-detected)
-ztx setup zed            # install the Zed task + keybinding, once
 ```
 
 ## Documentation

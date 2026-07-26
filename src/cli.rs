@@ -47,41 +47,6 @@ pub enum Command {
         stdout: bool,
     },
 
-    /// Send a file reference / selected text into a running session
-    /// (designed to be called from a Zed task; see `--from-zed-env`)
-    Send {
-        /// Read file/line/text from the ZED_RELATIVE_FILE, ZED_ROW and
-        /// ZED_SELECTED_TEXT environment variables instead of flags.
-        ///
-        /// Prefer this in Zed tasks: Zed runs tasks through `zsh -c "..."`
-        /// and interpolates $ZED_* into the command line, so passing the
-        /// selection as an argument lets the shell re-execute it. Reading
-        /// the values from the environment avoids that injection entirely.
-        #[arg(long)]
-        from_zed_env: bool,
-
-        /// File to reference (e.g. a path string)
-        #[arg(long)]
-        file: Option<String>,
-
-        /// Line number to reference
-        #[arg(long)]
-        line: Option<u32>,
-
-        /// Selected text to attach as a fenced block
-        #[arg(long)]
-        text: Option<String>,
-
-        /// Target a session by explicit socket path (default: this project's
-        /// session, keyed by ZED_WORKTREE_ROOT or the current directory)
-        #[arg(long)]
-        socket: Option<std::path::PathBuf>,
-
-        /// Free-form message text
-        #[arg(trailing_var_arg = true)]
-        message: Vec<String>,
-    },
-
     /// Notify a running session of an activity change (used by the Claude Code
     /// plugin hooks; a silent no-op when no session runs in this project)
     Notify {
@@ -107,40 +72,6 @@ pub enum Command {
 
     /// List running ztx sessions
     Sessions,
-
-    /// Generate editor integration (keybinding + task) for ztx
-    Setup {
-        #[command(subcommand)]
-        target: SetupTarget,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum SetupTarget {
-    /// Merge a ztx task and keybinding into the Zed configuration
-    Zed {
-        /// Apply changes without asking for confirmation
-        #[arg(long)]
-        yes: bool,
-
-        /// Show the changes that would be made without writing any files
-        #[arg(long)]
-        preview: bool,
-
-        /// Where to write the Zed configuration
-        #[arg(long, value_enum, default_value_t)]
-        scope: SetupScope,
-    },
-}
-
-/// Destination for `ztx setup zed`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
-pub enum SetupScope {
-    /// User-global config in `~/.config/zed/`.
-    #[default]
-    Global,
-    /// Project-local config in `<worktree>/.zed/`.
-    Project,
 }
 
 #[cfg(test)]
@@ -179,15 +110,6 @@ mod tests {
         };
         assert_eq!(title_mode, Some(crate::title::TitleMode::Managed));
         assert_eq!(adapter, crate::adapter::AdapterKind::Claude);
-    }
-
-    #[test]
-    fn parses_send_from_zed_env() {
-        let cli = Cli::try_parse_from(["ztx", "send", "--from-zed-env"]).unwrap();
-        let Command::Send { from_zed_env, .. } = cli.command else {
-            panic!("expected send subcommand");
-        };
-        assert!(from_zed_env);
     }
 
     #[test]

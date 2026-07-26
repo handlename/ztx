@@ -90,7 +90,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let child_pid = child.process_id();
     let master = pair.master;
     let mut child_output = master.try_clone_reader().map_err(io::Error::other)?;
-    // The child's input is shared between the stdin pump and the IPC server.
+    // The child's input, owned by the stdin pump.
     let child_writer: crate::ipc::SharedWriter =
         Arc::new(Mutex::new(master.take_writer().map_err(io::Error::other)?));
 
@@ -185,16 +185,13 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let (title_tx, title_rx) = mpsc::channel::<TitleSignal>();
     let transcript_store: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
 
-    // Start serving `ztx send` on the socket claimed above (if any).
+    // Start serving `ztx notify` on the socket claimed above (if any).
     // Kept alive for the session; dropped on exit to clean up the socket.
     let _ipc = bound.map(|b| {
-        b.serve(
-            child_writer.clone(),
-            crate::ipc::ControlChannels {
-                wake: title_tx.clone(),
-                transcript: transcript_store.clone(),
-            },
-        )
+        b.serve(crate::ipc::ControlChannels {
+            wake: title_tx.clone(),
+            transcript: transcript_store.clone(),
+        })
     });
 
     // stdin -> child, with ztx's prefix-key bindings peeled off when the
@@ -405,8 +402,8 @@ fn reclaim_project_socket() -> io::Result<Option<crate::ipc::BoundSocket>> {
 }
 
 /// Prompts `question` on stderr and reads a yes/no answer from stdin. EOF or an
-/// empty line is a safe "no". Mirrors `setup::confirm`; runs before raw mode is
-/// entered and before the stdin pump thread starts, so the shared stdin is free.
+/// empty line is a safe "no". Runs before raw mode is entered and before the
+/// stdin pump thread starts, so the shared stdin is free.
 fn prompt_yes_no(question: &str) -> io::Result<bool> {
     use std::io::BufRead;
     eprint!("{question} [y/N] ");
