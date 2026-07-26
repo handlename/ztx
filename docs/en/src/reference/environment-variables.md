@@ -28,7 +28,8 @@ chain, stopping at the first non-empty result:
 If none of the above yields a command, the export or open action fails with an
 error message suggesting that `ZTX_EDITOR` or `EDITOR` be set.
 
-> **Note:** ztx spawns the editor detached from the terminal (stdin, stdout,
+> [!NOTE]
+> ztx spawns the editor detached from the terminal (stdin, stdout,
 > and stderr are all redirected to null) so it does not interfere with the
 > wrapped TUI. GUI editors such as Zed work correctly; terminal editors opened
 > via `$EDITOR` will launch but will not be visible inside the wrapped session.
