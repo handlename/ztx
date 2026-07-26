@@ -58,6 +58,33 @@ Claude Code and antigravity-cli.
   terminal, another editor, CI). The supported surface is a Terminal Thread in
   Zed's agent panel; the IPC socket carries `notify` control frames only.
 
+## Feature lifecycle
+
+ztx exists only because Zed's Terminal Threads lack conveniences its ACP
+sessions have. Every feature is therefore a gap-filler, and the intended
+trajectory is for ztx to shrink rather than grow: when Zed ships an equivalent
+of a ztx feature, Zed's wins and ztx's is removed. Overlap is not a
+competition to win — a second implementation of something Zed already does
+costs users a dependency and costs this project maintenance, for no gain.
+
+**What counts as equivalent.** The Zed feature has to cover the same need for
+the same workflow. Partial overlap does not trigger a removal; both stay, and
+the docs explain when to reach for which. Two current cases:
+
+- `agent::AddSelectionToThread` (`cmd->`) vs. `ztx send` — `cmd->` targets the
+  focused thread, `ztx send` routes by project regardless of focus. Not
+  equivalent; both stay.
+- Zed's built-in path detection (cmd+click) vs. hint mode (`ctrl-] f`) —
+  cmd+click resolves one visible path, hint mode is keyboard-only over the
+  recent scrollback. Not equivalent; both stay.
+
+**How a removal happens**, following [Semantic Versioning](https://semver.org/):
+
+- **Before 1.0** — a feature can be removed in any release. 0.x makes no
+  compatibility promise.
+- **1.0 onward** — the feature is marked deprecated first and keeps working
+  unchanged, then is removed no earlier than the next major version.
+
 ## Acceptance criteria
 
 The bar v1 was built against, exercised with Claude Code and antigravity-cli

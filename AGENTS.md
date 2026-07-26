@@ -72,6 +72,33 @@ the deployed site rather than locally.
   transcript under `~/.claude/projects/` for the checkout you are working in,
   when one exists.
 
+## Feature lifecycle
+
+ztx fills gaps in Zed's Terminal Threads, so features are expected to leave.
+When Zed ships an equivalent, prefer Zed's and remove ztx's. `REQUIREMENTS.md`
+defines what counts as equivalent — partial overlap does not, and two current
+near-misses are listed there. Do not remove a feature on a judgement call;
+that section is the test.
+
+Removing a feature follows Semantic Versioning:
+
+- Before 1.0, remove it directly.
+- From 1.0, deprecate first and remove no earlier than the next major version.
+  A deprecated feature keeps working unchanged in the meantime.
+
+How to surface a deprecation, given that nothing may be written to the
+terminal while the child runs:
+
+- Always — mark it in the manual (`docs/en` first) and in the clap doc comment
+  for the flag or subcommand in `src/cli.rs`, which reaches `ztx --help`.
+- `export`, `send`, `sessions`, `setup` — a note on stderr is fine; no child
+  is attached to the terminal.
+- `run` — never write to the terminal, not even once at startup. Log it with
+  `tracing` instead.
+
+A release that removes a feature needs a deliberate major bump; do not let it
+ride on whatever bump tagpr would pick by default.
+
 ## Release
 
 tagpr manages releases: merging the tagpr-generated PR tags a version and
