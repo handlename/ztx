@@ -1,5 +1,19 @@
 # ztx
 
+> [!WARNING]
+> **Status: alpha — use at your own risk.**
+>
+> - **100% vibe-coded.** The entire codebase was produced by AI agents from
+>   natural-language direction.
+> - **Interfaces will change.** The author develops ztx while using it daily,
+>   so flags, config keys, and key bindings can change without notice or a
+>   deprecation period.
+> - **Alpha quality.** Expect rough edges. There is no warranty and no
+>   guarantee of fitness for any purpose; you use it at your own risk.
+> - **Built for its author.** This is a personal tool published in case it is
+>   useful to someone else. Issues are read, but a reply, a fix, or a merged
+>   pull request is not promised.
+
 **ztx** (Zed / Terminal session / eXchange) is a PTY-proxy wrapper that makes AI agent CLIs
 — Claude Code, antigravity-cli, and others — feel at home inside Zed's
 terminal sessions (Terminal Threads in the agent panel).

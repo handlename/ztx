@@ -1,5 +1,20 @@
 # Introduction
 
+> [!WARNING]
+> **Status: alpha — use at your own risk.**
+>
+> - **100% vibe-coded.** The entire codebase was produced by AI agents from
+>   natural-language direction.
+> - **Interfaces will change.** The author develops ztx while using it daily,
+>   so flags, config keys, and key bindings can change without notice or a
+>   deprecation period. This manual describes the current state, not a stable
+>   contract.
+> - **Alpha quality.** Expect rough edges. There is no warranty and no
+>   guarantee of fitness for any purpose; you use it at your own risk.
+> - **Built for its author.** This is a personal tool published in case it is
+>   useful to someone else. Issues are read, but a reply, a fix, or a merged
+>   pull request is not promised.
+
 > 日本語版: [ztx マニュアル](ja/introduction.html)
 
 **ztx** (Zed / Terminal session / eXchange) is a PTY-proxy wrapper that makes AI agent CLIs
