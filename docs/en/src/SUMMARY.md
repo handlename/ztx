@@ -13,7 +13,6 @@
 - [Session names](guide/session-names.md)
 - [Open files from the log](guide/open-files.md)
 - [Export the session log](guide/export-log.md)
-- [Send editor selections](guide/send-selections.md)
 - [One session per project](guide/one-session-per-project.md)
 
 # Reference

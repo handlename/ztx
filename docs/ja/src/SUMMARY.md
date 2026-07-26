@@ -13,7 +13,6 @@
 - [セッション名](guide/session-names.md)
 - [ログからファイルを開く](guide/open-files.md)
 - [セッションログをエクスポートする](guide/export-log.md)
-- [エディタの選択範囲を送る](guide/send-selections.md)
 - [プロジェクトごとに1セッション](guide/one-session-per-project.md)
 
 # リファレンス

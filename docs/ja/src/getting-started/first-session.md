@@ -59,7 +59,7 @@ ztx がセッションのトランスクリプトを Markdown に変換してエ
 
 ## 次のステップ
 
-- [Zed のセットアップ](zed-setup.md) — `cmd-alt-z` を設定して、エディタで選択したテキストを実行中のセッションに送る
+- [Zed のセットアップ](zed-setup.md) — `terminal_init_command` ですべての Terminal Thread を自動でラップする
 - [キーバインド](../reference/key-bindings.md) — `ctrl-]` アクションの全一覧とプレフィックスキーの変更方法
 
 > このページの英語版: [Your first session](../../getting-started/first-session.html)

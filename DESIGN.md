@@ -32,10 +32,9 @@ ztx run -- <agent-cli>
 │            (modal list fallback on primary screen)     │
 │ export     transcript→Markdown / capture→Markdown      │
 │ ipc        per-project Unix socket (cwd-hash name);    │
-│            `send` (paste) + `notify` (control frames:   │
-│            wake / transcript); one session per project │
+│            `notify` control frames (wake / transcript);│
+│            one session per project                     │
 │ adapter    trait + ClaudeCode / Antigravity / fallback │
-│ setup      Zed tasks.json / keymap.json merging        │
 │ config     user config.toml: prefix key, editor,       │
 │            status emoji (CLI > config > default)       │
 └────────────────────────────────────────────────────────┘
@@ -63,21 +62,26 @@ output).
   Its hooks call `ztx notify` over the same per-project socket to wake the
   title thread and report the transcript path. Polling stays authoritative, so
   a missed or absent hook only costs latency — the next poll reconciles. A
-  leading NUL distinguishes a control frame from `send`'s paste text, so the
-  wire stays backward compatible. Notify is best-effort: with no live session
-  it is a silent no-op, so a hook never fails the agent. Hook-supplied
-  transcript paths are trusted only under `~/.claude/projects/`.
+  leading NUL still marks every control frame: a session started by an older
+  ztx pastes any non-NUL payload straight into the agent's prompt, so dropping
+  the marker would make a new `notify` spray JSON into it. Notify is
+  best-effort: with no live session it is a silent no-op, so a hook never fails
+  the agent. Hook-supplied transcript paths are trusted only under
+  `~/.claude/projects/`.
+- **Selections come from Zed, not ztx.** Zed's built-in
+  `agent::AddSelectionToThread` (`cmd->`) pastes the editor selection into the
+  active Terminal Thread, so ztx carries no selection-sending path of its own
+  and needs no Zed task or keymap entry.
 - **Terminal restoration is non-negotiable.** Raw mode is guarded by RAII
   plus a panic hook; the managed title is cleared on exit.
-- **Zed config is opt-in.** `setup zed` shows the change, asks, and backs up;
-  files with comments are never rewritten automatically.
 - **Logs never touch the terminal** (`ZTX_LOG` writes to a file); stray
   output would corrupt the child's screen.
 
 ## Security notes
 
 - IPC sockets live in a 0700 per-user directory; anything writable there can
-  inject prompt text into sessions — same trust boundary as the user's shell.
+  steer a session's title and transcript path — same trust boundary as the
+  user's shell.
 - Exports may contain conversation content; they are written 0600 into the
   user's temp directory.
 - Adapters open external CLI state strictly read-only.

@@ -1,9 +1,9 @@
 # One session per project
 
 ztx enforces one active session per project directory. This constraint is what
-makes `ztx send` work without configuration: both the editor task and the
-running session agree on a single socket path derived from the project root,
-so injection is always O(1) with no scanning.
+makes `ztx notify` work without configuration: a plugin hook and the running
+session agree on a single socket path derived from the project root, so
+delivery is always O(1) with no scanning.
 
 ## Project socket
 
@@ -20,7 +20,7 @@ The runtime directory resolves in this order:
 2. `$XDG_RUNTIME_DIR/ztx` (if `$XDG_RUNTIME_DIR` is set)
 3. `$TMPDIR/ztx-run` (macOS per-user default)
 
-Both the session and any `ztx send` call hash the same canonical path
+Both the session and any `ztx notify` call hash the same canonical path
 (symlinks resolved) using FNV-1a 64-bit, so they always arrive at the same
 socket name without a registry lookup.
 
@@ -75,17 +75,13 @@ Prints the pid, socket path, and working directory for every session that
 currently owns a `.sock` file in the runtime directory. Sessions whose socket
 file exists but whose owner has exited are shown as not alive.
 
-## Routing sends explicitly
+## Routing notifications explicitly
 
-A bare `ztx send` routes to the project session. To address a specific session
-regardless of the current directory:
+A bare `ztx notify` routes to the project session. To address a specific
+session regardless of the current directory:
 
 ```sh
-ztx send --socket /private/tmp/ztx-run/a3f8c2d1e4b56789.sock --file foo.rs --line 1
+ztx notify --socket /private/tmp/ztx-run/a3f8c2d1e4b56789.sock --wake
 ```
 
-This is useful when working across multiple projects simultaneously or when
-scripting session interaction outside of Zed.
-
-See [Send editor selections](send-selections.md) for the full `ztx send`
-reference.
+This is useful when working across multiple projects simultaneously.

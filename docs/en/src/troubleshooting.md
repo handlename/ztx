@@ -106,15 +106,16 @@ Open the file and check:
 
 ---
 
-## `ztx send` not arriving / arriving in the wrong session
+## `ztx run` refuses to start / the title never refreshes
 
-**Symptoms:** `ztx send` exits with "no ztx session running for this project",
-or the text is injected into a different session than expected.
+**Symptoms:** `ztx run` reports that a session already owns this project's
+socket, `ztx sessions` lists a session you thought had exited, or the managed
+session name never reacts to plugin hook events.
 
 **How socket routing works:**
 
-`ztx run` and `ztx send` both key off the same project directory: the value of
-`ZED_WORKTREE_ROOT` when set (Zed injects this into tasks), otherwise the
+`ztx run` and `ztx notify` both key off the same project directory: the value
+of `ZED_WORKTREE_ROOT` when set (Zed injects this into tasks), otherwise the
 process's current directory. The path is canonicalized and hashed with FNV-1a
 to produce `<hash>.sock` inside the socket directory (`ZTX_RUNTIME_DIR` →
 `$XDG_RUNTIME_DIR/ztx` → `$TMPDIR/ztx-run`). There is no registry — both
@@ -122,26 +123,23 @@ sides compute the same path independently.
 
 **Common causes:**
 
-- **Directory mismatch.** If `ztx send` runs from a directory that differs
-  (after canonicalization) from where `ztx run` was started, the hashes
-  differ. Run `ztx sessions` to list live sessions and their working
-  directories, then use `--socket <path>` to target one explicitly.
-
-  ```sh
-  ztx sessions
-  ztx send --socket /path/to/<hash>.sock -- your message
-  ```
-
 - **Orphaned session from a previous editor session.** After a Zed restart
   the wrapper process may still be running (attached to a closed terminal).
   `ztx run` detects this and (interactively) offers to terminate the old
-  session and rebind the socket. If `ztx send` points at the orphaned session,
-  restart the wrapper or use `--socket` to target the new one.
+  session and rebind the socket.
 
 - **Stale socket file.** A socket file whose owner process has exited is
-  automatically taken over by the next `ztx run` in that project. If `ztx
-  send` reports no session, the wrapper is not running — start one with
-  `ztx run -- <cli>`.
+  automatically taken over by the next `ztx run` in that project.
+
+- **Directory mismatch.** A hook reporting a working directory that differs
+  (after canonicalization) from where `ztx run` was started hashes to a
+  different socket, so `ztx notify` silently targets nothing — by design, so a
+  hook never fails the agent. Run `ztx sessions` to list live sessions and
+  their working directories.
+
+  ```sh
+  ztx sessions
+  ```
 
 ---
 

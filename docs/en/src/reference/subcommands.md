@@ -1,6 +1,6 @@
 # Subcommands
 
-ztx exposes six subcommands. All persistent preferences live in
+ztx exposes four subcommands. All persistent preferences live in
 [`config.toml`](configuration.md); the flags below override them for a single
 invocation.
 
@@ -67,41 +67,6 @@ ztx export --stdout | pbcopy
 
 ---
 
-## `ztx send`
-
-Send a file reference, line number, or selected text into a running ztx
-session. The message is injected as a [Bracketed paste](../appendix/glossary.md) so
-the Agent CLI receives it as a single unit. Designed to be called from a Zed
-task (see `ztx setup zed`).
-
-```sh
-ztx send [OPTIONS] [message...]
-```
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--from-zed-env` | — | off | Read file, line, and selected text from the `ZED_RELATIVE_FILE`, `ZED_ROW`, and `ZED_SELECTED_TEXT` environment variables instead of explicit flags. Preferred in Zed tasks to avoid shell injection via `$ZED_*` interpolation. |
-| `--file` | path string | — | File path to include in the message. |
-| `--line` | integer | — | Line number to attach to the file reference. |
-| `--text` | string | — | Selected text to attach as a fenced code block. |
-| `--socket` | path | project socket | Target a specific session by its Unix socket path. Without this flag, ztx routes to the session whose project directory matches `ZED_WORKTREE_ROOT` (or the current directory). |
-| `message` | positional, multiple words | — | Free-form message text appended after any file/text context. |
-
-### Examples
-
-```sh
-# Inject the current Zed selection (called by the Zed task installed by setup zed).
-ztx send --from-zed-env
-
-# Inject an explicit reference.
-ztx send --file src/main.rs --line 42 --text "this panics on empty input"
-
-# Target a specific session.
-ztx send --socket ~/.local/share/ztx/abc123.sock "please review this"
-```
-
----
-
 ## `ztx notify`
 
 Notify a running session of an activity change. Used by the Claude Code plugin
@@ -147,35 +112,4 @@ No options. Example output:
 ```
 12345  /tmp/ztx/abc123.sock  /home/user/myproject
 67890  /tmp/ztx/def456.sock  /home/user/otherproject
-```
-
----
-
-## `ztx setup zed`
-
-Generate and merge a ztx task and keybinding into the Zed configuration. Run
-once after installing ztx. Prompts for confirmation and creates a backup before
-writing any files.
-
-```sh
-ztx setup zed [OPTIONS]
-```
-
-| Flag | Values | Default | Description |
-|------|--------|---------|-------------|
-| `--yes` | — | off | Apply changes without asking for confirmation. |
-| `--preview` | — | off | Show the changes that would be made without writing any files. |
-| `--scope` | `global` \| `project` | `global` | Where to write the Zed configuration. `global` writes to `~/.config/zed/`. `project` writes to `<worktree>/.zed/` (rooted at `ZED_WORKTREE_ROOT`, else the current directory); because Zed has no project-local keymap, project scope writes only the task and prints the keybinding for manual addition. |
-
-### Examples
-
-```sh
-# Interactive installation into the global Zed config.
-ztx setup zed
-
-# Preview what would change without writing anything.
-ztx setup zed --preview
-
-# Non-interactive install into the current project's .zed directory.
-ztx setup zed --scope project --yes
 ```

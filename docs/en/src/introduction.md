@@ -15,13 +15,12 @@ them:
 | **Session names that follow the work** | ztx injects OSC titles, so the thread name in the agent panel shows what the session is doing (via CLI-specific adapters) |
 | **Open files from the log** | `ctrl-] f` overlays hint labels on file paths in the recent output; picking one opens `zed <path>:<line>`. cmd+click works via Zed's built-in path detection |
 | **Open the session log as Markdown** | `ctrl-] e` (or `ztx export`) converts the session transcript to Markdown and opens it in the editor |
-| **Send editor selections into the session** | `ztx send` (bound to `cmd-alt-z` by `ztx setup zed`) injects `file:line` references and selected text into the running CLI |
 
 ## Where to go next
 
 - New to ztx? Start with [Installation](getting-started/installation.md), then
   [Your first session](getting-started/first-session.md).
-- Using Zed? [Zed setup](getting-started/zed-setup.md) wires up the task and keybinding.
+- Using Zed? [Zed setup](getting-started/zed-setup.md) covers wrapping every Terminal Thread automatically.
 - Looking for a specific feature? See the [Guide](guide/session-names.md).
 - Looking up a flag or a config key? See the [Reference](reference/subcommands.md).
 - Something not working? See [Troubleshooting](troubleshooting.md).

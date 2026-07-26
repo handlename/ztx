@@ -3,7 +3,7 @@
 > English version: [ztx Manual](../introduction.html)
 >
 > 検索について: mdBook の全文検索は英語向けのトークナイザを使うため、日本語の
-> 語句では検索できません。コマンド名やフラグ名（`ztx send`、`--adapter` など）
+> 語句では検索できません。コマンド名やフラグ名（`ztx export`、`--adapter` など）
 > での検索は機能します。日本語の内容を探す場合はサイドバーの目次をご利用ください。
 
 **ztx** (Zed / Terminal session / eXchange) は、AI エージェント CLI —— Claude Code、
@@ -19,13 +19,12 @@ ztx はそれを取り戻します。
 | **作業内容を追うセッション名** | ztx が OSC タイトルを注入するため、agent パネルのスレッド名がそのセッションの状況を示します（CLI 固有のアダプター (adapter) 経由） |
 | **ログからファイルを開く** | `ctrl-] f` で直近の出力に含まれるファイルパスにヒントラベルが重なります。1つ選ぶと `zed <path>:<line>` が開きます。Zed 組み込みのパス検出により cmd+click も機能します |
 | **セッションログを Markdown で開く** | `ctrl-] e`（または `ztx export`）でセッションのトランスクリプトを Markdown に変換し、エディタで開きます |
-| **エディタの選択範囲をセッションに送る** | `ztx send`（`ztx setup zed` により `cmd-alt-z` に割り当て）が `file:line` 参照と選択テキストを実行中の CLI に注入します |
 
 ## 次に読むもの
 
 - ztx が初めての方は [インストール](getting-started/installation.md)、続いて
   [最初のセッション](getting-started/first-session.md) から。
-- Zed をお使いなら [Zed のセットアップ](getting-started/zed-setup.md) がタスクとキーバインドを設定します。
+- Zed をお使いなら [Zed のセットアップ](getting-started/zed-setup.md) に全 Terminal Thread を自動でラップする方法があります。
 - 特定の機能を探しているなら [Guide](guide/session-names.md) を。
 - フラグや設定キーを引きたいなら [Reference](reference/subcommands.md) を。
 - うまく動かないときは [トラブルシューティング](troubleshooting.md) を。

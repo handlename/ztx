@@ -7,7 +7,7 @@
 設計を支える用語 —— *agent CLI*、*Terminal Thread*、*PTY proxy*、*adapter*、
 *fallback quality*、*session log*、*scrollback*、*tap*、*OSC title*、*title mode*、
 *prefix key*、*hint mode*、*export*、*IPC socket*、*project socket*、
-*bracketed paste*、*alternate screen* —— を扱っています。
+*alternate screen* —— を扱っています。
 
 定義をここに複製せず1箇所に保っているのは、このマニュアルとリポジトリの間で
 「その語が何を意味するか」がずれることを原理的に起こさないためです。
