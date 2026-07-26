@@ -41,9 +41,7 @@ the deployed site rather than locally.
 
 ## Version control
 
-- This is a **jujutsu (jj) colocated repo**. Use jj, not raw git.
-- Describe first: `jj desc -m "..."` before coding, `jj new -m "..."` to
-  start the next change. One logical change per commit.
+- One logical change per commit.
 - Commit messages: English, Conventional Commits (`feat:`, `fix:`, `chore:`,
   `docs:`).
 - Commits are GPG-signed via 1Password; if signing fails, stop and ask the

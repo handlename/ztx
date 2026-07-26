@@ -44,8 +44,7 @@ Claude Code and antigravity-cli.
   codes, and extended keyboard protocols must pass through unchanged; idle
   CPU stays below 1%.
 - Implementation language: Rust. Documentation and code comments: English.
-- Version control: jujutsu (jj), one described commit per implementation
-  step, GPG-signed.
+- Version control: git, one commit per implementation step, GPG-signed.
 
 ## Non-goals (v1)
 
