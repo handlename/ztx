@@ -28,6 +28,17 @@ cargo fmt --all --check                     # CI-enforced
 
 All three must pass before a change is considered done.
 
+For the manual:
+
+```sh
+mise run docs          # serve docs/en with live reload (mise run docs ja for JA)
+```
+
+This serves one book at `/`, so a Japanese page's link to its English
+counterpart silently lands on the wrong page. Cross-language links and the 404
+page only resolve under the `/ztx/` subpath Pages serves from, so check those on
+the deployed site rather than locally.
+
 ## Version control
 
 - This is a **jujutsu (jj) colocated repo**. Use jj, not raw git.

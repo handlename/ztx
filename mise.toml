@@ -1,3 +1,14 @@
 [tools]
 rust = "latest"
 mdbook = "0.5.4"
+
+[tasks.docs]
+description = "Serve one book with live reload: mise run docs [en|ja]"
+usage = '''
+arg "[lang]" default="en" help="Book to serve: en or ja"
+flag "--port <port>" default="3000" help="Port to listen on"
+'''
+# Serves one book at /, so a page's link to its counterpart in the other
+# language lands on the wrong page. Cross-language links and the 404 page only
+# resolve correctly under the /ztx/ subpath GitHub Pages serves from.
+run = 'mdbook serve "docs/$usage_lang" --open --port "$usage_port"'
