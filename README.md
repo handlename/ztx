@@ -56,12 +56,14 @@ Removals follow [Semantic Versioning](https://semver.org/):
 
 ## Installation
 
-Download a binary from [releases](https://github.com/handlename/ztx/releases),
-or build from source:
-
 ```sh
-cargo install --path .
+cargo install ztx
 ```
+
+This builds from the published crate and needs Rust 1.96 or newer. To skip the
+toolchain entirely, download a pre-built binary from
+[releases](https://github.com/handlename/ztx/releases). To build from a
+checkout, use `cargo install --path .`.
 
 ## Quick start
 

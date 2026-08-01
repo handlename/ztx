@@ -56,12 +56,14 @@ Terminal Threads で機能するようになったため、エディタの選択
 
 ## インストール
 
-[releases](https://github.com/handlename/ztx/releases) からバイナリを
-ダウンロードするか、ソースからビルドしてください。
-
 ```sh
-cargo install --path .
+cargo install ztx
 ```
+
+公開されている crate からビルドするため、Rust 1.96 以降が必要です。ツールチェーンを
+用意せずに済ませたい場合は、[releases](https://github.com/handlename/ztx/releases)
+からビルド済みバイナリをダウンロードしてください。チェックアウトからビルドする場合は
+`cargo install --path .` を使います。
 
 ## クイックスタート
 
