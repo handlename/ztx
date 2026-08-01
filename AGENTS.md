@@ -88,9 +88,10 @@ the deployed site rather than locally.
 
 ztx fills gaps in Zed's Terminal Threads, so features are expected to leave.
 When Zed ships an equivalent, prefer Zed's and remove ztx's. `REQUIREMENTS.md`
-defines what counts as equivalent — partial overlap does not, and two current
-near-misses are listed there. Do not remove a feature on a judgement call;
-that section is the test.
+defines what counts as equivalent — partial overlap does not. That section also
+records the one removal so far (editor-selection sending) and the current
+near-miss (cmd+click vs. hint mode). Do not remove a feature on a judgement
+call; that section is the test.
 
 Removing a feature follows Semantic Versioning:
 
@@ -103,8 +104,8 @@ terminal while the child runs:
 
 - Always — mark it in the manual (`docs/en` first) and in the clap doc comment
   for the flag or subcommand in `src/cli.rs`, which reaches `ztx --help`.
-- `export`, `send`, `sessions`, `setup` — a note on stderr is fine; no child
-  is attached to the terminal.
+- `export`, `notify`, `sessions` — a note on stderr is fine; no child is
+  attached to the terminal.
 - `run` — never write to the terminal, not even once at startup. Log it with
   `tracing` instead.
 

@@ -54,11 +54,14 @@ Every feature above is a gap-filler for something Zed's Terminal Threads do
 not do. When Zed ships an equivalent, the Zed one wins and ztx's version is
 removed: expect this manual to lose pages over time rather than gain them.
 
-Partial overlap is not equivalence. Where a Zed feature covers only part of
-the need, both stay and this manual explains the difference — see
-[Send editor selections](guide/send-selections.md), where Zed's
-`agent::AddSelectionToThread` (`cmd->`) and `ztx send` reach the same session
-by different routes.
+That already cost this manual a page: editor-selection sending was dropped
+once Zed's `agent::AddSelectionToThread` (`cmd->`) worked in Terminal Threads,
+and the `ztx setup zed` command that bound it went too.
+
+Partial overlap is not equivalence, though. Where a Zed feature covers only
+part of the need, both stay and this manual explains the difference — see
+[Open files from the log](guide/open-files.md), where cmd+click and hint mode
+(`ctrl-] f`) solve neighbouring problems.
 
 Removals follow [Semantic Versioning](https://semver.org/):
 

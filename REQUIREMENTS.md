@@ -69,14 +69,17 @@ costs users a dependency and costs this project maintenance, for no gain.
 
 **What counts as equivalent.** The Zed feature has to cover the same need for
 the same workflow. Partial overlap does not trigger a removal; both stay, and
-the docs explain when to reach for which. Two current cases:
+the docs explain when to reach for which.
 
-- `agent::AddSelectionToThread` (`cmd->`) vs. `ztx send` — `cmd->` targets the
-  focused thread, `ztx send` routes by project regardless of focus. Not
-  equivalent; both stay.
-- Zed's built-in path detection (cmd+click) vs. hint mode (`ctrl-] f`) —
-  cmd+click resolves one visible path, hint mode is keyboard-only over the
-  recent scrollback. Not equivalent; both stay.
+The one removal so far is the worked example: editor-selection sending
+(`ztx send`, listed under Non-goals above) went away once Zed's
+`agent::AddSelectionToThread` (`cmd->`) worked in Terminal Threads, because it
+covered the whole need. Its `ztx setup zed` companion went with it, having
+existed only to install that keybinding.
+
+The current near-miss is Zed's built-in path detection (cmd+click) vs. hint
+mode (`ctrl-] f`): cmd+click resolves one visible path, hint mode is
+keyboard-only over the recent scrollback. Not equivalent, so both stay.
 
 **How a removal happens**, following [Semantic Versioning](https://semver.org/):
 

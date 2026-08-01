@@ -39,9 +39,13 @@ removed: this project is meant to shrink over time, not to accumulate. A
 second implementation of a feature Zed already has costs you a dependency and
 costs this project maintenance, for no gain.
 
-Partial overlap is not equivalence. Where a Zed feature covers only part of
-the need, both stay and the docs explain the difference — `ztx send` and Zed's
-`agent::AddSelectionToThread` (`cmd->`) are the current example.
+This already happened once: editor-selection sending (`ztx send`, plus the
+`ztx setup zed` command that existed to bind it) was dropped when Zed's
+`agent::AddSelectionToThread` (`cmd->`) started working in Terminal Threads.
+
+Partial overlap is not equivalence, though. Where a Zed feature covers only
+part of the need, both stay and the docs explain the difference — cmd+click and
+hint mode (`ctrl-] f`) are the current example.
 
 Removals follow [Semantic Versioning](https://semver.org/):
 
