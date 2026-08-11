@@ -1,5 +1,18 @@
 # Installation
 
+## crates.io
+
+ztx is published on [crates.io](https://crates.io/crates/ztx), so one command
+is enough:
+
+```sh
+cargo install ztx
+```
+
+This compiles from the published crate, so it needs a Rust toolchain — 1.96 or
+newer ([`rustup`](https://rustup.rs) is the recommended way to install one). No
+checkout is involved. Re-run the same command to upgrade.
+
 ## Binary
 
 Download a pre-built binary for your platform from the

@@ -14,6 +14,17 @@ source of truth, `docs/ja` follows), published at
 behavior — a flag, a config key, a key binding — update `docs/en` in the same
 change; `docs/ja` may follow later.
 
+`README.md` (English) is the source of truth for the overview; `README.ja.md`
+is its Japanese counterpart. Unlike `docs/ja`, translate in the **same change**
+— never leave the Japanese README behind. The two are short, they are the front
+door of the repository, and drift there misinforms whoever arrives first. A
+change that edits one and not the other is incomplete.
+
+Both files carry a link to the other directly under the status block
+(`> 日本語版: …` / `> English version: …`); keep it there. Their in-page anchor
+links differ by language (`#feature-lifecycle` vs `#機能のライフサイクル`), so
+check those after renaming a heading.
+
 ## Build, test, lint
 
 Rust is provisioned via mise (`mise.toml`); prefix commands with
@@ -44,14 +55,15 @@ the deployed site rather than locally.
 - One logical change per commit.
 - Commit messages: English, Conventional Commits (`feat:`, `fix:`, `chore:`,
   `docs:`).
-- Commits are GPG-signed via 1Password; if signing fails, stop and ask the
-  user to unlock 1Password.
+- Commits are GPG-signed. If signing fails, stop and ask the user rather than
+  committing unsigned.
 - Run `cargo fmt --all` before every commit — unformatted code fails the
   CI-enforced `cargo fmt --all --check`.
 
 ## Conventions
 
-- Documentation and code comments are **English**.
+- Documentation and code comments are **English**. The only exceptions are the
+  files that exist to be Japanese: `README.ja.md` and `docs/ja/`.
 - Comments explain constraints the code cannot show; no redundant narration.
 - Module-level `//!` docs carry the design context for each module.
 - Undocumented external state (Claude Code / agy files) must be read
@@ -62,14 +74,43 @@ the deployed site rather than locally.
 
 ## Testing notes
 
-- Interactive behavior is tested with `/usr/bin/expect` driving the real
-  binary (see the PTY passthrough and hint-mode checks in the history).
-  Beware Tcl's `\x` escape: `send "\x1de"` sends U+01DE, not `ctrl-]` + `e`;
-  split into two `send` calls.
+- `cargo test` covers the unit level. Interactive behavior (PTY passthrough,
+  hint mode) has no committed harness — check it ad hoc with `/usr/bin/expect`
+  driving the real binary. Beware Tcl's `\x` escape: `send "\x1de"` sends
+  U+01DE, not `ctrl-]` + `e`; split into two `send` calls.
 - `ZTX_RUNTIME_DIR`, `ZTX_ZED_CONFIG_DIR`, `ZTX_EDITOR`, and
   `ZTX_LOG_FILE` exist so tests never touch real user state.
-- Verify features against real data when possible (a real Claude Code
-  transcript exists for this repo's cwd).
+- Verify features against real data when possible — e.g. a Claude Code
+  transcript under `~/.claude/projects/` for the checkout you are working in,
+  when one exists.
+
+## Feature lifecycle
+
+ztx fills gaps in Zed's Terminal Threads, so features are expected to leave.
+When Zed ships an equivalent, prefer Zed's and remove ztx's. `REQUIREMENTS.md`
+defines what counts as equivalent — partial overlap does not. That section also
+records the one removal so far (editor-selection sending) and the current
+near-miss (cmd+click vs. hint mode). Do not remove a feature on a judgement
+call; that section is the test.
+
+Removing a feature follows Semantic Versioning:
+
+- Before 1.0, remove it directly.
+- From 1.0, deprecate first and remove no earlier than the next major version.
+  A deprecated feature keeps working unchanged in the meantime.
+
+How to surface a deprecation, given that nothing may be written to the
+terminal while the child runs:
+
+- Always — mark it in the manual (`docs/en` first) and in the clap doc comment
+  for the flag or subcommand in `src/cli.rs`, which reaches `ztx --help`.
+- `export`, `notify`, `sessions` — a note on stderr is fine; no child is
+  attached to the terminal.
+- `run` — never write to the terminal, not even once at startup. Log it with
+  `tracing` instead.
+
+A release that removes a feature needs a deliberate major bump; do not let it
+ride on whatever bump tagpr would pick by default.
 
 ## Release
 

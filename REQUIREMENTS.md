@@ -42,7 +42,6 @@ Claude Code and antigravity-cli.
   codes, and extended keyboard protocols must pass through unchanged; idle
   CPU stays below 1%.
 - Implementation language: Rust. Documentation and code comments: English.
-- Version control: git, one commit per implementation step, GPG-signed.
 
 ## Non-goals (v1)
 
@@ -59,22 +58,57 @@ Claude Code and antigravity-cli.
   terminal, another editor, CI). The supported surface is a Terminal Thread in
   Zed's agent panel; the IPC socket carries `notify` control frames only.
 
+## Feature lifecycle
+
+ztx exists only because Zed's Terminal Threads lack conveniences its ACP
+sessions have. Every feature is therefore a gap-filler, and the intended
+trajectory is for ztx to shrink rather than grow: when Zed ships an equivalent
+of a ztx feature, Zed's wins and ztx's is removed. Overlap is not a
+competition to win — a second implementation of something Zed already does
+costs users a dependency and costs this project maintenance, for no gain.
+
+**What counts as equivalent.** The Zed feature has to cover the same need for
+the same workflow. Partial overlap does not trigger a removal; both stay, and
+the docs explain when to reach for which.
+
+The one removal so far is the worked example: editor-selection sending
+(`ztx send`, listed under Non-goals above) went away once Zed's
+`agent::AddSelectionToThread` (`cmd->`) worked in Terminal Threads, because it
+covered the whole need. Its `ztx setup zed` companion went with it, having
+existed only to install that keybinding.
+
+The current near-miss is Zed's built-in path detection (cmd+click) vs. hint
+mode (`ctrl-] f`): cmd+click resolves one visible path, hint mode is
+keyboard-only over the recent scrollback. Not equivalent, so both stay.
+
+**How a removal happens**, following [Semantic Versioning](https://semver.org/):
+
+- **Before 1.0** — a feature can be removed in any release. 0.x makes no
+  compatibility promise.
+- **1.0 onward** — the feature is marked deprecated first and keeps working
+  unchanged, then is removed no earlier than the next major version.
+
 ## Acceptance criteria
 
-Verified with Claude Code and antigravity-cli inside Zed Terminal Threads:
+The bar v1 was built against, exercised with Claude Code and antigravity-cli
+inside Zed Terminal Threads:
 
-- [ ] A wrapped CLI is indistinguishable from the bare CLI in daily use
-      (raw mode, resize, signals, exit codes, Shift+Enter / kitty protocol).
-- [ ] Feature 1: the session name follows the session's activity
-      (adapter quality) or the child's own titles (fallback).
-- [ ] Feature 2a: cmd+click opens logged file paths at the right line.
-- [ ] Feature 2b: hint mode opens logged file paths without the mouse.
-- [ ] Feature 3: one action exports the log as Markdown into the editor
-      (structured via adapter transcript; capture fallback otherwise).
-- [ ] Wrapping a CLI with no adapter (e.g. bash) keeps features 1–3 working
-      at fallback quality.
-- [ ] Terminal state is restored even when ztx panics.
-- [ ] Idle CPU usage stays below 1%.
+- A wrapped CLI is indistinguishable from the bare CLI in daily use
+  (raw mode, resize, signals, exit codes, Shift+Enter / kitty protocol).
+- Feature 1: the session name follows the session's activity
+  (adapter quality) or the child's own titles (fallback).
+- Feature 2a: cmd+click opens logged file paths at the right line.
+- Feature 2b: hint mode opens logged file paths without the mouse.
+- Feature 3: one action exports the log as Markdown into the editor
+  (structured via adapter transcript; capture fallback otherwise).
+- Wrapping a CLI with no adapter (e.g. bash) keeps features 1–3 working
+  at fallback quality.
+- Terminal state is restored even when ztx panics.
+- Idle CPU usage stays below 1%.
 
-The full decision history (interview transcript, ambiguity scoring, ADR) is
-kept in the planning documents outside this repository.
+Interactive criteria are held up by the author's day-to-day use rather than by
+an automated conformance suite; see the alpha-quality caveats in the README.
+
+The decision history behind these requirements (interview transcript,
+ambiguity scoring, ADR) lives in the author's private planning notes and is
+not published.

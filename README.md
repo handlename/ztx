@@ -1,5 +1,22 @@
 # ztx
 
+> [!WARNING]
+> **Status: alpha — use at your own risk.**
+>
+> - **100% vibe-coded.** The entire codebase was produced by AI agents from
+>   natural-language direction.
+> - **Interfaces will change.** The author develops ztx while using it daily,
+>   so while ztx is pre-1.0, flags, config keys, and key bindings can change
+>   without notice or a deprecation period. See
+>   [Feature lifecycle](#feature-lifecycle) for what changes after 1.0.
+> - **Alpha quality.** Expect rough edges. There is no warranty and no
+>   guarantee of fitness for any purpose; you use it at your own risk.
+> - **Built for its author.** This is a personal tool published in case it is
+>   useful to someone else. Issues are read, but a reply, a fix, or a merged
+>   pull request is not promised.
+
+> 日本語版: [README.ja.md](README.ja.md)
+
 **ztx** (Zed / Terminal session / eXchange) is a PTY-proxy wrapper that makes AI agent CLIs
 — Claude Code, antigravity-cli, and others — feel at home inside Zed's
 terminal sessions (Terminal Threads in the agent panel).
@@ -14,14 +31,39 @@ them:
 | **Open files from the log** | `ctrl-] f` overlays hint labels on file paths in the recent output; picking one opens `zed <path>:<line>`. cmd+click works via Zed's built-in path detection |
 | **Open the session log as Markdown** | `ctrl-] e` (or `ztx export`) converts the session transcript to Markdown and opens it in the editor |
 
+## Feature lifecycle
+
+Every feature above is a gap-filler for something Zed's Terminal Threads do
+not do. When Zed ships an equivalent, the Zed one wins and ztx's version is
+removed: this project is meant to shrink over time, not to accumulate. A
+second implementation of a feature Zed already has costs you a dependency and
+costs this project maintenance, for no gain.
+
+This already happened once: editor-selection sending (`ztx send`, plus the
+`ztx setup zed` command that existed to bind it) was dropped when Zed's
+`agent::AddSelectionToThread` (`cmd->`) started working in Terminal Threads.
+
+Partial overlap is not equivalence, though. Where a Zed feature covers only
+part of the need, both stay and the docs explain the difference — cmd+click and
+hint mode (`ctrl-] f`) are the current example.
+
+Removals follow [Semantic Versioning](https://semver.org/):
+
+- **Before 1.0** — a feature can be removed in any release; 0.x makes no
+  compatibility promise.
+- **1.0 onward** — the feature is marked deprecated first and keeps working,
+  then is removed no earlier than the next major version.
+
 ## Installation
 
-Download a binary from [releases](https://github.com/handlename/ztx/releases),
-or build from source:
-
 ```sh
-cargo install --path .
+cargo install ztx
 ```
+
+This builds from the published crate and needs Rust 1.96 or newer. To skip the
+toolchain entirely, download a pre-built binary from
+[releases](https://github.com/handlename/ztx/releases). To build from a
+checkout, use `cargo install --path .`.
 
 ## Quick start
 
@@ -37,7 +79,7 @@ ztx run -- claude        # wrap an agent CLI (adapter auto-detected)
 The manual covers installation, every feature, the full CLI and configuration
 reference, and troubleshooting.
 
-For contributors: [DESIGN.md](DESIGN.md) (architecture),
+For reading the code: [DESIGN.md](DESIGN.md) (architecture),
 [REQUIREMENTS.md](REQUIREMENTS.md) (requirements), and
 [GLOSSARY.md](GLOSSARY.md) (terminology).
 
