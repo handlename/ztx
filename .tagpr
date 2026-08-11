@@ -4,3 +4,8 @@
     vPrefix = true
     release = draft
     command = cargo check
+    # Not `command`: that hook runs *before* the version bump, so cargo would see
+    # the old version and leave Cargo.lock untouched. `postVersionCommand` runs
+    # after the bump, so the refreshed Cargo.lock lands in the release commit and
+    # `cargo publish` no longer finds a dirty working directory.
+    postVersionCommand = cargo check
