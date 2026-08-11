@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  # Lets the archive naming be verified via dry-run without cutting a tag.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,12 +17,16 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
+            asset: darwin_arm64
           - target: x86_64-apple-darwin
             os: macos-latest
+            asset: darwin_amd64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            asset: linux_amd64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            asset: linux_arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -32,17 +38,41 @@ jobs:
         if: runner.os == 'Linux'
         with:
           target: ${{ matrix.target }}
+      - name: Resolve version
+        id: version
+        # GitHub Actions expressions cannot strip the leading "v", so do it in the shell.
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - name: Build and upload binary
         uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
         with:
           bin: ztx
           target: ${{ matrix.target }}
-          archive: $bin-$tag-$target
-          checksum: sha256
+          # maltmill detects assets solely by the substrings "darwin"/"linux" and
+          # "amd64"/"arm64", so the Rust target triple cannot appear here.
+          archive: $bin_${{ steps.version.outputs.version }}_${{ matrix.asset }}
+          dry-run: ${{ github.event_name == 'workflow_dispatch' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  publish:
+  checksums:
     needs: build
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Upload aggregated checksums
+        # Not the action's `checksum` input: that emits one `<archive>.sha256` per
+        # target, and those filenames would also match maltmill's OS/arch detection.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release download "${GITHUB_REF_NAME}" --dir dist --pattern '*.tar.gz'
+          (cd dist && sha256sum -- *.tar.gz > "ztx_${version}_checksums.txt")
+          gh release upload "${GITHUB_REF_NAME}" "dist/ztx_${version}_checksums.txt" --clobber
+
+  publish:
+    needs: [build, checksums]
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -53,6 +83,7 @@ jobs:
 
   publish-crate:
     needs: build
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       # Required for crates.io Trusted Publishing (OIDC token exchange).
