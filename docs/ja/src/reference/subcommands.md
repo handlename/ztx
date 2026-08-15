@@ -15,11 +15,15 @@ ztx run [OPTIONS] -- <command> [args...]
 
 `--` セパレーターは必須です。それ以降の引数はすべてそのまま子プロセスの argv として渡されます。
 
+そのため、以下のフラグは **`--` より前** に置く必要があります。`--` の後ろに書くと ztx ではなく子プロセスへの引数になります。たとえば `ztx run -- claude --force` は「`claude --force` を起動する」という意味であり、ztx の `--force` は有効になりません。正しくは `ztx run --force -- claude` です。
+
 | フラグ | 値 | デフォルト | 説明 |
 |------|--------|---------|-------------|
 | `--adapter` | `auto` \| `claude` \| `antigravity` \| `none` | `auto` | アダプターを選択します。`auto` はコマンド名から自動検出します（`claude` → Claude Code アダプター、`agy` / `antigravity` → Antigravity アダプター、それ以外 → アダプターなし）。 |
 | `--title-mode` | `passthrough` \| `managed` \| `prefix` | アダプターが一致する場合は `managed`、それ以外は `passthrough` | 子プロセスからの OSC タイトルシーケンスの処理方法を制御します。`passthrough` はそのまま転送します。`managed` は抑制し、ztx がアダプター駆動のタイトルを送出します。`prefix` は固定文字列でタイトルを書き換えます。 |
 | `--title-prefix` | 文字列 | `"<command>: "` | `--title-mode prefix` が有効なときに使用するプレフィックス文字列。 |
+| `--force` | — | オフ | 同じプロジェクトでライブセッションが動いていても、確認せずに終了させて新しいセッションを開始します。ターミナルに接続されているかの判定もスキップするため、インタラクティブでない文脈でも動作します。デフォルトは `config.toml` の [`[run] force`](configuration.md) で変更できます。 |
+| `--no-force` | — | オフ | `config.toml` で `[run] force = true` にしていても、その実行に限って確認プロンプトを有効に戻します。`--force` と併記した場合は後に書いた方が優先されます。 |
 
 ### 使用例
 
@@ -32,6 +36,9 @@ ztx run --adapter none -- bash
 
 # 未登録の CLI に対してカスタムプレフィックスで managed タイトルを強制します。
 ztx run --adapter none --title-mode prefix --title-prefix "work: " -- mycli
+
+# 既存のライブセッションを確認なしで置き換えます（Zed のタスクなど非対話環境でも動作）。
+ztx run --force -- claude
 ```
 
 ---

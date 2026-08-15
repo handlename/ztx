@@ -29,6 +29,15 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t)]
         adapter: crate::adapter::AdapterKind,
 
+        /// Replace a live session in this project without confirming
+        /// (also skips the refusal to act when stdin is not a terminal)
+        #[arg(long, overrides_with = "no_force")]
+        force: bool,
+
+        /// Keep the confirmation even when `[run] force` is set in config.toml
+        #[arg(long, overrides_with = "force")]
+        no_force: bool,
+
         /// Agent CLI command and its arguments (pass after `--`)
         #[arg(required = true, trailing_var_arg = true)]
         command: Vec<String>,
@@ -72,6 +81,23 @@ pub enum Command {
 
     /// List running ztx sessions
     Sessions,
+}
+
+/// The effective `--force` setting for `ztx run`.
+///
+/// `--force` and `--no-force` are an `overrides_with` pair, so clap leaves at
+/// most one of them set and the later flag on the command line wins. Neither
+/// set means "no CLI preference", which is where `config.toml` gets its say —
+/// the same **CLI argument > config.toml > built-in default** precedence the
+/// rest of the settings follow.
+pub fn resolve_force(force: bool, no_force: bool, config_force: bool) -> bool {
+    if force {
+        true
+    } else if no_force {
+        false
+    } else {
+        config_force
+    }
 }
 
 #[cfg(test)]
@@ -146,5 +172,59 @@ mod tests {
         };
         assert!(wake);
         assert_eq!(transcript, Some(std::path::PathBuf::from("/p/t.jsonl")));
+    }
+
+    /// Extracts `(force, no_force)` from a parsed `ztx run …` argv.
+    fn run_force_flags(args: &[&str]) -> (bool, bool) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Command::Run {
+            force, no_force, ..
+        } = cli.command
+        else {
+            panic!("expected run subcommand");
+        };
+        (force, no_force)
+    }
+
+    #[test]
+    fn run_force_is_off_by_default() {
+        assert_eq!(
+            run_force_flags(&["ztx", "run", "--", "claude"]),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn parses_run_force_flag() {
+        assert_eq!(
+            run_force_flags(&["ztx", "run", "--force", "--", "claude"]),
+            (true, false)
+        );
+        assert_eq!(
+            run_force_flags(&["ztx", "run", "--no-force", "--", "claude"]),
+            (false, true)
+        );
+    }
+
+    #[test]
+    fn force_and_no_force_are_last_wins() {
+        let (force, no_force) =
+            run_force_flags(&["ztx", "run", "--force", "--no-force", "--", "claude"]);
+        assert!(!resolve_force(force, no_force, true));
+
+        let (force, no_force) =
+            run_force_flags(&["ztx", "run", "--no-force", "--force", "--", "claude"]);
+        assert!(resolve_force(force, no_force, false));
+    }
+
+    #[test]
+    fn resolve_force_prefers_cli_over_config() {
+        // --force wins over a config that says off.
+        assert!(resolve_force(true, false, false));
+        // --no-force wins over a config that says on.
+        assert!(!resolve_force(false, true, true));
+        // No flag: the config decides.
+        assert!(resolve_force(false, false, true));
+        assert!(!resolve_force(false, false, false));
     }
 }
