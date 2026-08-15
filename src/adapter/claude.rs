@@ -11,7 +11,9 @@
 //! The terminal title is built as `{status emoji} {worktree name}`: `status`
 //! (`busy`/`idle`/`waiting`) selects the emoji, and the worktree name is derived from
 //! `cwd`. Claude's own `name` (a `{repo}-{random}` slug) is intentionally not
-//! used — it carries no useful information. Everything here is best-effort:
+//! read — it carries no useful information. The naming flows the other way:
+//! [`super::with_session_name`] hands Claude Code the worktree name via `-n`
+//! at spawn time, so both sides agree. Everything here is best-effort:
 //! when the registry is missing or the schema changed, the adapter returns
 //! `None` and the caller falls back to the child's own OSC titles.
 
@@ -197,7 +199,7 @@ pub(crate) fn derive_title(cwd: &Path) -> String {
 /// Extracts the worktree name for the layout `.../worktrees/<repo>/<name>/<repo>`:
 /// the leaf basename just repeats the repo, so the worktree name is the parent
 /// directory. Returns `None` when `cwd` is not under a `worktrees/` tree.
-fn worktree_name(cwd: &Path) -> Option<String> {
+pub(crate) fn worktree_name(cwd: &Path) -> Option<String> {
     let under_worktrees = cwd
         .components()
         .any(|c| c.as_os_str() == std::ffi::OsStr::new("worktrees"));

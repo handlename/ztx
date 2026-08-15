@@ -48,6 +48,22 @@ Without the Claude Code plugin, the adapter polls the session registry every
 two seconds. The title's status emoji may therefore lag slightly behind the
 actual state.
 
+#### Naming the Claude Code session
+
+In a git worktree checkout, `ztx run` also passes `-n <worktree name>` to
+`claude`, so Claude Code names its own session the same way the thread is
+labelled. The name appears in Claude Code's session picker, and
+`claude --resume <worktree name>` resolves it.
+
+The flag is inserted before the arguments you pass after `--`. Claude Code
+takes the last `-n` on the command line, so `ztx run -- claude -n mine` still
+names the session `mine`.
+
+Outside a worktree layout the command is left untouched. The branch and
+basename fallbacks work fine as a thread label, but a Claude Code session name
+is a machine-wide resume handle, and every repository checked out on `main`
+would claim the same one.
+
 ### antigravity-cli adapter (default for `agy`)
 
 The antigravity-cli adapter looks up the current conversation title from
