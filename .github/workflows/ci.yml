@@ -22,6 +22,10 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test --all-targets
+      - name: Verify Cargo.lock is in sync
+        # tagpr's release PR is checked by this job, so a version bump that failed
+        # to refresh Cargo.lock is caught here rather than in `cargo publish`.
+        run: cargo metadata --locked --format-version 1 > /dev/null
 
   docs:
     runs-on: ubuntu-latest

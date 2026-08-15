@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.1.2](https://github.com/handlename/ztx/compare/v0.1.1...v0.1.2) - 2026-08-11
+
+- fix: keep Cargo.lock in sync for crates.io publish by @handlename in https://github.com/handlename/ztx/pull/11
+
 ## [v0.1.1](https://github.com/handlename/ztx/compare/v0.1.0...v0.1.1) - 2026-08-11
 
 - docs: prepare for the public release by @handlename in https://github.com/handlename/ztx/pull/8
