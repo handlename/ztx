@@ -93,6 +93,20 @@ session starts waiting for input or finishes responding. Requires
 | `desktop` | bool | `true` | Whether to emit a desktop notification. Set to `false` to disable entirely. |
 | `sound` | string | `"Glass"` | Notification sound name as listed in System Settings → Sound. Set to `""` for a silent notification. |
 
+---
+
+### `[run]`
+
+Defaults for `ztx run`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `force` | bool | `false` | Terminate a live session already running in this project without confirming, then start fresh here. Setting it to `true` is the same as passing `--force` on every `ztx run`. |
+
+`force = true` kills the existing session's agent without asking. Enable it
+only for workflows where editor restarts routinely orphan sessions. Pass
+[`--no-force`](subcommands.md) to bring the confirmation back for a single run.
+
 ## Complete example
 
 ```toml
@@ -115,4 +129,8 @@ waiting = "🔔"   # blocked on a question or choice prompt
 # macOS desktop notifications via terminal-notifier (brew install terminal-notifier).
 desktop = true    # set false to disable
 sound   = "Glass" # sound name from Sound Preferences; "" for silent
+
+[run]
+# Replace a live session without confirming (same as passing --force every time).
+force = false
 ```

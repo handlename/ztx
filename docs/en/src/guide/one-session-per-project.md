@@ -58,6 +58,25 @@ existing session and start fresh in the current terminal. This is useful for
 reclaiming a session that was orphaned by an editor restart — the process is
 still listening but no longer attached to any Zed thread.
 
+### Skipping the confirmation
+
+Pass `--force` to terminate the existing session without asking. It clears
+both gates — the prompt and the refusal to act when stdin is not a terminal —
+so it is what you need when launching from a Zed task or a script:
+
+```sh
+ztx run --force -- claude
+```
+
+Set `[run] force` in [`config.toml`](../reference/configuration.md) to make
+that the default instead of passing the flag every time, and pass `--no-force`
+to bring the confirmation back for a single run. When both flags appear, the
+later one on the command line wins.
+
+`--force` only removes the confirmation. If the existing session's pid was
+never recorded, or the socket is still held after SIGKILL, ztx reports the
+error and refuses to start, exactly as before.
+
 ztx sends SIGTERM to the existing wrapper and waits up to two seconds for the
 socket to be released. If the socket is still owned after the grace period,
 ztx escalates to SIGKILL.

@@ -77,6 +77,18 @@ macOS デスクトップ通知の動作。Claude Code セッションが入力�
 | `desktop` | bool | `true` | デスクトップ通知を送出するかどうか。`false` に設定すると完全に無効化します。 |
 | `sound` | string | `"Glass"` | システム設定 → サウンドに記載されている通知サウンド名。`""` に設定するとサイレント通知になります。 |
 
+---
+
+### `[run]`
+
+`ztx run` のデフォルト。
+
+| キー | 型 | デフォルト | 説明 |
+|-----|------|---------|-------------|
+| `force` | bool | `false` | 同じプロジェクトでライブセッションが動いている場合に、確認せず終了させて新しいセッションを開始します。`true` にすると `ztx run` に毎回 `--force` を渡したのと同じになります。 |
+
+`force = true` は既存セッションの agent を確認なしで終了させます。エディタの再起動でセッションが孤立しがちな使い方でのみ有効にしてください。その実行に限って確認を戻すには [`--no-force`](subcommands.md) を渡します。
+
 ## 完全な例
 
 ```toml
@@ -99,6 +111,10 @@ waiting = "🔔"   # 質問または選択肢プロンプトでブロック中
 # terminal-notifier 経由の macOS デスクトップ通知（brew install terminal-notifier）。
 desktop = true    # false に設定すると無効化
 sound   = "Glass" # サウンド設定からのサウンド名；"" でサイレント
+
+[run]
+# ライブセッションを確認なしで置き換える（--force を毎回渡すのと同じ）。
+force = false
 ```
 
 > このページの英語版: [Configuration](../../reference/configuration.html)

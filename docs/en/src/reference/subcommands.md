@@ -19,11 +19,18 @@ ztx run [OPTIONS] -- <command> [args...]
 The `--` separator is required. Everything after it is passed verbatim to the
 child as its argv.
 
+The flags below therefore have to come **before** `--`; anything after it is an
+argument to the child, not to ztx. For example, `ztx run -- claude --force`
+means "launch `claude --force`" and leaves ztx's own `--force` off. Write
+`ztx run --force -- claude` instead.
+
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
 | `--adapter` | `auto` \| `claude` \| `antigravity` \| `none` | `auto` | Selects the Adapter. `auto` detects from the command name (`claude` → Claude Code adapter, `agy` / `antigravity` → Antigravity adapter, anything else → no adapter). |
 | `--title-mode` | `passthrough` \| `managed` \| `prefix` | `managed` when an adapter matches, `passthrough` otherwise | Controls how OSC title sequences from the child are handled. `passthrough` forwards them unchanged; `managed` suppresses them and lets ztx emit adapter-driven titles; `prefix` rewrites them with a fixed string. |
 | `--title-prefix` | string | `"<command>: "` | The prefix string used when `--title-mode prefix` is active. |
+| `--force` | — | off | Terminate a live session already running in this project without confirming, then start fresh here. Also skips the check for whether stdin is a terminal, so it works from non-interactive contexts. The default comes from [`[run] force`](configuration.md) in `config.toml`. |
+| `--no-force` | — | off | Bring the confirmation back for a single run even when `config.toml` sets `[run] force = true`. When combined with `--force`, the later flag on the command line wins. |
 
 ### Examples
 
@@ -36,6 +43,9 @@ ztx run --adapter none -- bash
 
 # Force managed titles with a custom prefix on an unlisted CLI.
 ztx run --adapter none --title-mode prefix --title-prefix "work: " -- mycli
+
+# Replace an existing live session without confirming (works from a Zed task).
+ztx run --force -- claude
 ```
 
 ---
