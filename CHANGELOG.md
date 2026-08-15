@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.2.0](https://github.com/handlename/ztx/compare/v0.1.2...v0.2.0) - 2026-08-15
+
+- fix: keep Cargo.lock synced across tagpr releases by @handlename in https://github.com/handlename/ztx/pull/13
+- feat: add --force to reclaim a live session by @handlename in https://github.com/handlename/ztx/pull/15
+- feat: name Claude Code sessions after worktrees by @handlename in https://github.com/handlename/ztx/pull/16
+
 ## [v0.1.2](https://github.com/handlename/ztx/compare/v0.1.1...v0.1.2) - 2026-08-11
 
 - fix: keep Cargo.lock in sync for crates.io publish by @handlename in https://github.com/handlename/ztx/pull/11
