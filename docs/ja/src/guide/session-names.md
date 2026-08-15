@@ -36,6 +36,14 @@ Claude Code アダプターは `~/.claude/sessions/<pid>.json` にある Claude 
 
 Claude Code プラグインがない場合、アダプターはセッションレジストリを2秒ごとにポーリングします。そのため、タイトルのステータス絵文字が実際の状態より若干遅れることがあります。
 
+#### Claude Code のセッション名
+
+git ワークツリーのチェックアウトでは、`ztx run` は `claude` に `-n <worktree name>` も渡します。これにより Claude Code 自身のセッション名がスレッド名と揃います。この名前は Claude Code のセッションピッカーに表示され、`claude --resume <worktree name>` で解決できます。
+
+このフラグは `--` 以降に渡した引数より前に挿入されます。Claude Code はコマンドラインで最後に現れた `-n` を採用するため、`ztx run -- claude -n mine` を実行すればセッション名は `mine` のままになります。
+
+ワークツリーレイアウト外ではコマンドは一切変更されません。ブランチ名やベース名へのフォールバックはスレッド名としては十分ですが、Claude Code のセッション名はマシン全体で一意な resume ハンドルであり、`main` をチェックアウトしているリポジトリがすべて同じ名前を要求してしまうためです。
+
 ### antigravity-cli アダプター (`agy` のデフォルト)
 
 antigravity-cli アダプターは作業ディレクトリの `~/.gemini/antigravity-cli/cache/last_conversations.json` と `conversation_summaries.db` から現在の会話タイトルを取得します。antigravity-cli が記録する会話タイトルをそのまま表示します。会話のペイロード形式が不透明なため、ステータス絵文字は追加されません。

@@ -30,6 +30,13 @@ fn main() -> ExitCode {
             adapter,
             command,
         } => {
+            // Hand Claude Code the same session name ztx shows in the title, so
+            // the session picker and `--resume <name>` speak the same language.
+            // A cwd we cannot read is not worth failing over: run unnamed.
+            let command = match std::env::current_dir() {
+                Ok(cwd) => adapter::with_session_name(adapter, &command, &cwd),
+                Err(_) => command,
+            };
             let opts = pty::RunOptions {
                 title_mode,
                 title_prefix,
