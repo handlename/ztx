@@ -18,6 +18,9 @@
 //! [notify]                # macOS desktop notifications (via terminal-notifier)
 //! desktop = true          # fire on waiting/finished; needs terminal-notifier
 //! sound = "Glass"         # notification sound name; "" for silent
+//!
+//! [run]                   # `ztx run` defaults
+//! force = false           # replace a live session without confirming
 //! ```
 
 use std::path::PathBuf;
@@ -43,6 +46,16 @@ pub struct Config {
     pub status_emoji: StatusEmoji,
     /// Desktop-notification behavior for hook events.
     pub notify: NotifyConfig,
+    /// Defaults for `ztx run` flags.
+    pub run: RunConfig,
+}
+
+/// Defaults for `ztx run`. `force` stays off unless the user opts out of the
+/// confirmation deliberately: replacing a live session kills its agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunConfig {
+    /// Replace a live session in this project without confirming.
+    pub force: bool,
 }
 
 /// macOS desktop-notification settings. Enabled by default so that installing
@@ -151,11 +164,16 @@ impl Config {
             }
         }
 
+        let run = RunConfig {
+            force: raw.run.and_then(|r| r.force).unwrap_or_default(),
+        };
+
         Self {
             prefix,
             editor,
             status_emoji,
             notify,
+            run,
         }
     }
 }
@@ -167,6 +185,7 @@ struct RawConfig {
     editor: Option<String>,
     status_emoji: Option<RawStatusEmoji>,
     notify: Option<RawNotify>,
+    run: Option<RawRun>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -180,6 +199,11 @@ struct RawStatusEmoji {
 struct RawNotify {
     desktop: Option<bool>,
     sound: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawRun {
+    force: Option<bool>,
 }
 
 /// Parses a prefix-key spec into its control byte. Only the `ctrl-<key>` form
@@ -313,5 +337,28 @@ mod tests {
             Config::default()
         );
         assert_eq!(Config::load_from(None), Config::default());
+    }
+
+    #[test]
+    fn run_force_defaults_to_off() {
+        assert!(!Config::parse("").run.force);
+        assert_eq!(Config::parse("").run, RunConfig::default());
+    }
+
+    #[test]
+    fn run_force_can_be_enabled() {
+        assert!(Config::parse("[run]\nforce = true\n").run.force);
+    }
+
+    #[test]
+    fn run_force_can_be_explicitly_disabled() {
+        assert!(!Config::parse("[run]\nforce = false\n").run.force);
+    }
+
+    #[test]
+    fn non_bool_run_force_falls_back_to_defaults() {
+        // `force` must be a bool; a string makes the file unparseable, which
+        // falls back wholesale like any other malformed config.
+        assert_eq!(Config::parse("[run]\nforce = \"yes\"\n"), Config::default());
     }
 }

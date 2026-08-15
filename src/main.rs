@@ -28,6 +28,8 @@ fn main() -> ExitCode {
             title_mode,
             title_prefix,
             adapter,
+            force,
+            no_force,
             command,
         } => {
             let opts = pty::RunOptions {
@@ -37,6 +39,7 @@ fn main() -> ExitCode {
                 prefix: config.prefix.unwrap_or(input::DEFAULT_PREFIX),
                 editor: config.editor,
                 status_emoji: config.status_emoji,
+                force: cli::resolve_force(force, no_force, config.run.force),
             };
             match pty::run(&command, opts) {
                 Ok(code) => ExitCode::from(code.min(u8::MAX as u32) as u8),

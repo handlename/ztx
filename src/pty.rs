@@ -38,6 +38,9 @@ pub struct RunOptions {
     pub editor: Option<String>,
     /// Status-emoji prefixes for the managed title (from config).
     pub status_emoji: crate::config::StatusEmoji,
+    /// Replace a live session in this project without confirming
+    /// (`--force`, or `[run] force` in config.toml).
+    pub force: bool,
 }
 
 /// Runs `command` inside a PTY, passing terminal I/O through (unchanged
@@ -61,7 +64,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
             // A session already owns this project's socket — often one orphaned
             // by an editor restart, still listening but detached from any
             // terminal. Report it and, when interactive, offer to replace it.
-            match reclaim_project_socket()? {
+            match reclaim_project_socket(opts.force)? {
                 Some(bound) => Some(bound),
                 None => return Ok(1),
             }
@@ -360,11 +363,37 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     Ok(status.exit_code())
 }
 
+/// What to do about a live session already holding this project's socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reclaim {
+    /// Report the session and start nothing: there is no terminal to ask on
+    /// and the caller did not opt out of confirming.
+    Abort,
+    /// Ask the human before terminating.
+    Ask,
+    /// Terminate it right away (`--force`).
+    Terminate,
+}
+
+/// Decides how a session collision is resolved.
+///
+/// Kept pure and separate from [`reclaim_project_socket`] so every
+/// (force, tty) combination is testable without a terminal or a live session.
+fn decide(force: bool, is_tty: bool) -> Reclaim {
+    match (force, is_tty) {
+        // `--force` is an explicit "replace whatever is there", so it clears
+        // both gates: the prompt and the refusal to act without a terminal.
+        (true, _) => Reclaim::Terminate,
+        (false, true) => Reclaim::Ask,
+        (false, false) => Reclaim::Abort,
+    }
+}
+
 /// Handles a `bind_project` collision: describes the session blocking this
-/// project and, when stdin is interactive, offers to terminate it and start
-/// fresh here. Returns the rebound socket when the user agrees, or `None` when
+/// project and, per [`decide`], either terminates it or leaves it alone.
+/// Returns the rebound socket when the project was reclaimed, or `None` when
 /// nothing was started (the session was only reported, so `run` should exit).
-fn reclaim_project_socket() -> io::Result<Option<crate::ipc::BoundSocket>> {
+fn reclaim_project_socket(force: bool) -> io::Result<Option<crate::ipc::BoundSocket>> {
     let Some(existing) = crate::ipc::existing_project_session() else {
         // The owner vanished between the failed bind and now: just try again.
         return crate::ipc::IpcServer::bind_project().map(Some);
@@ -384,12 +413,14 @@ fn reclaim_project_socket() -> io::Result<Option<crate::ipc::BoundSocket>> {
         existing.socket.display()
     );
 
-    // Never terminate a session without a human's confirmation: a
-    // non-interactive caller (Zed task, pipe) only gets the report above.
-    if !io::stdin().is_terminal() {
+    // Never terminate a session without a human's confirmation, unless the
+    // caller asked for exactly that: a non-interactive caller (Zed task, pipe)
+    // without `--force` only gets the report above.
+    let decision = decide(force, io::stdin().is_terminal());
+    if decision == Reclaim::Abort {
         return Ok(None);
     }
-    if !prompt_yes_no("terminate it and start a new session here?")? {
+    if decision == Reclaim::Ask && !prompt_yes_no("terminate it and start a new session here?")? {
         return Ok(None);
     }
     let Some(pid) = existing.pid else {
@@ -604,6 +635,22 @@ mod tests {
             }
         }
         result
+    }
+
+    #[test]
+    fn force_terminates_without_asking_on_a_terminal_or_a_pipe() {
+        assert_eq!(decide(true, true), Reclaim::Terminate);
+        assert_eq!(decide(true, false), Reclaim::Terminate);
+    }
+
+    #[test]
+    fn without_force_a_terminal_is_asked() {
+        assert_eq!(decide(false, true), Reclaim::Ask);
+    }
+
+    #[test]
+    fn without_force_a_pipe_aborts_rather_than_killing_silently() {
+        assert_eq!(decide(false, false), Reclaim::Abort);
     }
 
     #[test]
