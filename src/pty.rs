@@ -425,9 +425,14 @@ fn reclaim_project_socket(force: bool) -> io::Result<Option<crate::ipc::BoundSoc
     }
     let Some(pid) = existing.pid else {
         return Err(io::Error::other(
-            "cannot terminate the existing session: its pid was not recorded",
+            "cannot terminate the existing session: its pid could not be determined",
         ));
     };
+    if pid == std::process::id() {
+        return Err(io::Error::other(
+            "cannot terminate the existing session: it resolves to this process",
+        ));
+    }
     crate::ipc::terminate_session(pid, &existing.socket)?;
     crate::ipc::IpcServer::bind_project().map(Some)
 }
