@@ -123,10 +123,11 @@ sides compute the same path independently.
 
 **Common causes:**
 
-- **Orphaned session from a previous editor session.** After a Zed restart
-  the wrapper process may still be running (attached to a closed terminal).
-  `ztx run` detects this and (interactively) offers to terminate the old
-  session and rebind the socket.
+- **Orphaned session from a previous editor session.** The wrapper exits
+  when its terminal closes, but one started by an older ztx may still be
+  running after a Zed restart, with its child stuck exiting. `ztx run` detects
+  this and (interactively, or always with `--force`) offers to terminate the
+  old session and rebind the socket.
 
 - **Stale socket file.** A socket file whose owner process has exited is
   automatically taken over by the next `ztx run` in that project.
