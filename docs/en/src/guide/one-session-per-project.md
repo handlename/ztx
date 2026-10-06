@@ -26,7 +26,10 @@ socket name without a registry lookup.
 
 A sibling `<hash>.info` file records the wrapper's pid and working directory
 on two lines. It is used only for display (`ztx sessions`) and collision
-reporting; socket resolution never reads it. The pid of a live session is
+reporting; socket resolution never reads it. The wrapper rewrites it every
+hour while it runs, so temporary-directory cleaners (such as macOS's, which
+removes files in `$TMPDIR` older than three days) do not delete it from under
+a long session. The pid of a live session is
 asked from the socket itself (the kernel knows which process is listening), so
 it is shown even when `.info` has gone missing; `.info` is the fallback for
 the pid and the only record of the working directory.

@@ -30,6 +30,12 @@ pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 /// hosts) from a runaway or malicious client exhausting memory.
 const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
 
+/// How often a running wrapper rewrites its `.info`. Temp-dir cleaners delete
+/// files that look unused — macOS dirhelper sweeps `$TMPDIR` of files older
+/// than 3 days, systemd-tmpfiles does the same for the `temp_dir()` fallback on
+/// Linux — while a long session's socket survives, losing its pid and cwd.
+const INFO_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
 /// Marks an IPC message as a control frame. Every frame ztx sends today is a
 /// control frame, so the prefix is redundant on its own — it is kept because a
 /// long-lived session started by an older ztx still pastes any non-NUL payload
@@ -149,6 +155,7 @@ fn socket_path_for(cwd: &Path) -> PathBuf {
 pub struct BoundSocket {
     listener: UnixListener,
     socket_path: PathBuf,
+    cwd: PathBuf,
 }
 
 /// Server side, owned by the wrapper process. Cleans its socket up on drop.
@@ -180,15 +187,12 @@ impl IpcServer {
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path)?;
 
-        // Record pid + cwd for `sessions` display only.
-        let _ = std::fs::write(
-            socket_path.with_extension("info"),
-            format!("{}\n{}", std::process::id(), cwd.display()),
-        );
+        write_info(&socket_path, &cwd);
 
         Ok(BoundSocket {
             listener,
             socket_path,
+            cwd,
         })
     }
 }
@@ -198,6 +202,13 @@ impl BoundSocket {
     /// hands back an [`IpcServer`] for cleanup.
     pub fn serve(self, control: ControlChannels) -> IpcServer {
         let listener = self.listener;
+        let (socket_path, cwd) = (self.socket_path.clone(), self.cwd);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(INFO_REFRESH_INTERVAL);
+                write_info(&socket_path, &cwd);
+            }
+        });
         thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { continue };
@@ -425,6 +436,18 @@ fn positive_pid(pid: libc::pid_t) -> Option<u32> {
     u32::try_from(pid).ok().filter(|&p| p > 0)
 }
 
+/// Records this wrapper's pid and cwd in `<hash>.info` (`pid\ncwd`) for
+/// display. Best-effort. Written via rename so readers never see a partial
+/// file and every refresh gives the file fresh timestamps.
+fn write_info(socket_path: &Path, cwd: &Path) {
+    let info = socket_path.with_extension("info");
+    let tmp = socket_path.with_extension("info.tmp");
+    let content = format!("{}\n{}", std::process::id(), cwd.display());
+    if std::fs::write(&tmp, content).is_err() || std::fs::rename(&tmp, &info).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
 /// Parses a `<hash>.info` file (`pid\ncwd`).
 fn read_info(info_path: &Path) -> (Option<u32>, Option<PathBuf>) {
     let Ok(content) = std::fs::read_to_string(info_path) else {
@@ -542,6 +565,25 @@ mod tests {
             assert_eq!(list_sessions()[0].pid, Some(std::process::id()));
             drop(server);
         });
+    }
+
+    #[test]
+    fn write_info_round_trips_without_leftovers() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("abc.sock");
+        write_info(&socket, Path::new("/some/project"));
+        assert_eq!(
+            read_info(&socket.with_extension("info")),
+            (
+                Some(std::process::id()),
+                Some(PathBuf::from("/some/project"))
+            )
+        );
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["abc.info"]);
     }
 
     #[test]
