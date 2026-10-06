@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.2.1](https://github.com/handlename/ztx/compare/v0.2.0...v0.2.1) - 2026-10-06
+
+- fix: reclaim a session whose pid was not recorded by @handlename in https://github.com/handlename/ztx/pull/17
+- fix: keep draining the child after the terminal goes away by @handlename in https://github.com/handlename/ztx/pull/18
+- fix: refresh session info so TMPDIR cleanup keeps it by @handlename in https://github.com/handlename/ztx/pull/19
+
 ## [v0.2.0](https://github.com/handlename/ztx/compare/v0.1.2...v0.2.0) - 2026-08-15
 
 - fix: keep Cargo.lock synced across tagpr releases by @handlename in https://github.com/handlename/ztx/pull/13
