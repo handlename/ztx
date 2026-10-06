@@ -26,7 +26,13 @@ socket name without a registry lookup.
 
 A sibling `<hash>.info` file records the wrapper's pid and working directory
 on two lines. It is used only for display (`ztx sessions`) and collision
-reporting; socket resolution never reads it.
+reporting; socket resolution never reads it. The wrapper rewrites it every
+hour while it runs, so temporary-directory cleaners (such as macOS's, which
+removes files in `$TMPDIR` older than three days) do not delete it from under
+a long session. The pid of a live session is
+asked from the socket itself (the kernel knows which process is listening), so
+it is shown even when `.info` has gone missing; `.info` is the fallback for
+the pid and the only record of the working directory.
 
 ## Project root
 
@@ -73,13 +79,16 @@ that the default instead of passing the flag every time, and pass `--no-force`
 to bring the confirmation back for a single run. When both flags appear, the
 later one on the command line wins.
 
-`--force` only removes the confirmation. If the existing session's pid was
-never recorded, or the socket is still held after SIGKILL, ztx reports the
-error and refuses to start, exactly as before.
+`--force` only removes the confirmation. If the existing session's pid cannot
+be determined (neither the socket nor `.info` provides it, which happens only
+on platforms other than macOS and Linux), or the socket is still held after
+SIGKILL, ztx reports the error and refuses to start, exactly as before.
 
 ztx sends SIGTERM to the existing wrapper and waits up to two seconds for the
 socket to be released. If the socket is still owned after the grace period,
-ztx escalates to SIGKILL.
+ztx escalates to SIGKILL. An orphaned wrapper usually takes the SIGKILL path:
+it forwards SIGTERM to its child instead of exiting, so expect the two-second
+pause.
 
 A stale socket file whose owner has already exited is detected automatically
 (the connect attempt fails) and taken over without prompting.

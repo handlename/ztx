@@ -8,8 +8,10 @@
 //! owns the project's socket, `ztx run` reports it and (interactively) offers
 //! to terminate it and rebind, rather than silently launching a second one.
 //! `--socket` overrides the target explicitly. A sibling `<hash>.info` records
-//! pid and cwd; it feeds `ztx sessions` display and `run`'s collision report
-//! (including the pid to terminate), but is never used for socket resolution.
+//! pid and cwd for `ztx sessions` and `run`'s collision report, but is never
+//! used for socket resolution. It can go missing (e.g. TMPDIR cleanup), so the
+//! pid of a live session is asked from the socket itself first; `.info` is the
+//! fallback for the pid and the only record of the cwd.
 
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -27,6 +29,12 @@ pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 /// Upper bound for one IPC message; protects the wrapper (and the session it
 /// hosts) from a runaway or malicious client exhausting memory.
 const MAX_MESSAGE_LEN: u64 = 1024 * 1024;
+
+/// How often a running wrapper rewrites its `.info`. Temp-dir cleaners delete
+/// files that look unused — macOS dirhelper sweeps `$TMPDIR` of files older
+/// than 3 days, systemd-tmpfiles does the same for the `temp_dir()` fallback on
+/// Linux — while a long session's socket survives, losing its pid and cwd.
+const INFO_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
 /// Marks an IPC message as a control frame. Every frame ztx sends today is a
 /// control frame, so the prefix is redundant on its own — it is kept because a
@@ -147,6 +155,7 @@ fn socket_path_for(cwd: &Path) -> PathBuf {
 pub struct BoundSocket {
     listener: UnixListener,
     socket_path: PathBuf,
+    cwd: PathBuf,
 }
 
 /// Server side, owned by the wrapper process. Cleans its socket up on drop.
@@ -178,15 +187,12 @@ impl IpcServer {
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path)?;
 
-        // Record pid + cwd for `sessions` display only.
-        let _ = std::fs::write(
-            socket_path.with_extension("info"),
-            format!("{}\n{}", std::process::id(), cwd.display()),
-        );
+        write_info(&socket_path, &cwd);
 
         Ok(BoundSocket {
             listener,
             socket_path,
+            cwd,
         })
     }
 }
@@ -196,6 +202,13 @@ impl BoundSocket {
     /// hands back an [`IpcServer`] for cleanup.
     pub fn serve(self, control: ControlChannels) -> IpcServer {
         let listener = self.listener;
+        let (socket_path, cwd) = (self.socket_path.clone(), self.cwd);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(INFO_REFRESH_INTERVAL);
+                write_info(&socket_path, &cwd);
+            }
+        });
         thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(stream) = stream else { continue };
@@ -226,8 +239,10 @@ impl BoundSocket {
 
 impl Drop for IpcServer {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket_path);
+        // `.info` first: once the socket is unlinked a new wrapper may rebind
+        // and write its own `.info`, which must not be deleted from under it.
         let _ = std::fs::remove_file(self.socket_path.with_extension("info"));
+        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
@@ -260,12 +275,10 @@ pub fn send(socket: &Path, message: &[u8]) -> io::Result<()> {
 pub fn existing_project_session() -> Option<SessionInfo> {
     let cwd = project_cwd();
     let socket = socket_path_for(&cwd);
-    if UnixStream::connect(&socket).is_err() {
-        return None;
-    }
-    let (pid, info_cwd) = read_info(&socket.with_extension("info"));
+    let stream = UnixStream::connect(&socket).ok()?;
+    let (info_pid, info_cwd) = read_info(&socket.with_extension("info"));
     Some(SessionInfo {
-        pid,
+        pid: owner_pid(&stream, info_pid),
         alive: true,
         // Fall back to the resolved project dir when the `.info` file is
         // missing or unreadable, so callers always have a directory to show.
@@ -342,16 +355,97 @@ pub fn list_sessions() -> Vec<SessionInfo> {
         if path.extension().is_none_or(|e| e != "sock") {
             continue;
         }
-        let (pid, cwd) = read_info(&path.with_extension("info"));
+        let (info_pid, cwd) = read_info(&path.with_extension("info"));
+        let stream = UnixStream::connect(&path).ok();
         sessions.push(SessionInfo {
-            pid,
-            alive: UnixStream::connect(&path).is_ok(),
+            pid: match &stream {
+                Some(stream) => owner_pid(stream, info_pid),
+                None => info_pid,
+            },
+            alive: stream.is_some(),
             cwd,
             socket: path,
         });
     }
     sessions.sort_unstable_by_key(|s| s.pid);
     sessions
+}
+
+/// The pid of the process listening behind `stream`: the socket's own answer
+/// when the platform provides one, else the pid recorded in `.info`. The socket
+/// wins because it names the live owner, while `.info` may be stale or gone.
+fn owner_pid(stream: &UnixStream, info_pid: Option<u32>) -> Option<u32> {
+    let peer = peer_pid(stream);
+    if peer.is_some() && info_pid.is_some() && peer != info_pid {
+        tracing::debug!(?peer, ?info_pid, "socket owner differs from .info pid");
+    }
+    peer.or(info_pid)
+}
+
+/// Asks the kernel for the pid of the process that owns the listening end of
+/// a connected Unix stream. `None` on unsupported platforms or failure.
+#[cfg(target_os = "macos")]
+fn peer_pid(stream: &UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // SAFETY: `pid`/`len` are valid for writes and sized for LOCAL_PEERPID.
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_LOCAL,
+            libc::LOCAL_PEERPID,
+            (&raw mut pid).cast(),
+            &mut len,
+        )
+    };
+    (rc == 0).then_some(pid).and_then(positive_pid)
+}
+
+#[cfg(target_os = "linux")]
+fn peer_pid(stream: &UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: `cred`/`len` are valid for writes and sized for SO_PEERCRED.
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut cred).cast(),
+            &mut len,
+        )
+    };
+    (rc == 0).then_some(cred.pid).and_then(positive_pid)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn peer_pid(_stream: &UnixStream) -> Option<u32> {
+    None
+}
+
+/// Rejects 0 (e.g. an owner in another pid namespace) and negative pids, which
+/// `kill` would treat as process groups.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn positive_pid(pid: libc::pid_t) -> Option<u32> {
+    u32::try_from(pid).ok().filter(|&p| p > 0)
+}
+
+/// Records this wrapper's pid and cwd in `<hash>.info` (`pid\ncwd`) for
+/// display. Best-effort. Written via rename so readers never see a partial
+/// file and every refresh gives the file fresh timestamps.
+fn write_info(socket_path: &Path, cwd: &Path) {
+    let info = socket_path.with_extension("info");
+    let tmp = socket_path.with_extension("info.tmp");
+    let content = format!("{}\n{}", std::process::id(), cwd.display());
+    if std::fs::write(&tmp, content).is_err() || std::fs::rename(&tmp, &info).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
 }
 
 /// Parses a `<hash>.info` file (`pid\ncwd`).
@@ -448,6 +542,48 @@ mod tests {
             drop(server);
             assert!(!socket.exists() && !info.exists());
         });
+    }
+
+    #[test]
+    fn peer_pid_names_the_listening_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peer.sock");
+        let _listener = UnixListener::bind(&path).unwrap();
+        let stream = UnixStream::connect(&path).unwrap();
+        assert_eq!(peer_pid(&stream), Some(std::process::id()));
+    }
+
+    #[test]
+    fn existing_session_pid_survives_a_missing_info_file() {
+        let project = tempfile::tempdir().unwrap();
+        with_env(project.path(), || {
+            let server = IpcServer::bind_project().unwrap().serve(discard_channels());
+            let socket = socket_path_for(&canonical(project.path()));
+            std::fs::remove_file(socket.with_extension("info")).unwrap();
+            let existing = existing_project_session().expect("session is live");
+            assert_eq!(existing.pid, Some(std::process::id()));
+            assert_eq!(list_sessions()[0].pid, Some(std::process::id()));
+            drop(server);
+        });
+    }
+
+    #[test]
+    fn write_info_round_trips_without_leftovers() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("abc.sock");
+        write_info(&socket, Path::new("/some/project"));
+        assert_eq!(
+            read_info(&socket.with_extension("info")),
+            (
+                Some(std::process::id()),
+                Some(PathBuf::from("/some/project"))
+            )
+        );
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["abc.info"]);
     }
 
     #[test]

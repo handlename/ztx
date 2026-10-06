@@ -1,5 +1,6 @@
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -27,6 +28,11 @@ const TITLE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// that traps SIGHUP can keep the (now unusable) wrapper — and its socket —
 /// alive before teardown.
 const HANGUP_GRACE: Duration = Duration::from_secs(2);
+
+/// How long the wrapper waits for the output pump after the child exits once
+/// the terminal is gone. A grandchild that keeps the PTY open would otherwise
+/// hold the pump (and the wrapper) forever, with nobody left to read it.
+const LOST_OUTPUT_DRAIN: Duration = Duration::from_millis(500);
 
 pub struct RunOptions {
     pub title_mode: Option<TitleMode>,
@@ -136,6 +142,11 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let mut signals = Signals::new([SIGWINCH, SIGTERM, SIGHUP, SIGINT])?;
     let signal_handle = signals.handle();
     let tap_for_signals = tap_shared.clone();
+
+    // Set once the parent terminal is gone (SIGHUP, or a failed write when the
+    // child was printing). From then on output is drained and discarded.
+    let stdout_lost = Arc::new(AtomicBool::new(false));
+    let stdout_lost_for_signals = stdout_lost.clone();
     let signal_thread = thread::spawn(move || {
         for signal in &mut signals {
             match signal {
@@ -148,6 +159,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
                         .screen_rows = size.rows;
                 }
                 SIGHUP => {
+                    stdout_lost_for_signals.store(true, Ordering::Relaxed);
                     // The controlling terminal is gone (e.g. the editor pane or
                     // window closed): this session can no longer be seen or
                     // driven. Forward the hangup so the child may exit and
@@ -266,6 +278,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     let mut tap = TermTap::new(tap_shared.clone());
     let mut filter = TitleFilter::new(title_mode, title_prefix);
     let gate_for_pump = stdout_gate.clone();
+    let stdout_lost_for_pump = stdout_lost.clone();
     let output_thread = thread::spawn(move || {
         let mut stdout = io::stdout();
         let mut buf = [0u8; IO_BUF_SIZE];
@@ -274,15 +287,18 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
             match child_output.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    filtered.clear();
-                    filter.feed(&buf[..n], &mut filtered);
-                    {
+                    // Keep reading after the terminal is gone: on macOS an
+                    // exiting child blocks until its PTY output is drained, so
+                    // stopping here would leave it (and `child.wait()`) stuck.
+                    // Checked before taking the gate so a hint overlay holding
+                    // it cannot stall the drain.
+                    if !stdout_lost_for_pump.load(Ordering::Relaxed) {
+                        filtered.clear();
+                        filter.feed(&buf[..n], &mut filtered);
                         let _gate = gate_for_pump.lock().expect("stdout gate poisoned");
-                        if stdout.write_all(&filtered).is_err() {
-                            break;
-                        }
-                        if stdout.flush().is_err() {
-                            break;
+                        if stdout.write_all(&filtered).is_err() || stdout.flush().is_err() {
+                            stdout_lost_for_pump.store(true, Ordering::Relaxed);
+                            tracing::debug!("stdout lost; draining child output");
                         }
                     }
                     tap.advance(&buf[..n]);
@@ -291,7 +307,7 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
         }
         filtered.clear();
         filter.flush(&mut filtered);
-        if !filtered.is_empty() {
+        if !filtered.is_empty() && !stdout_lost_for_pump.load(Ordering::Relaxed) {
             let _gate = gate_for_pump.lock().expect("stdout gate poisoned");
             let _ = stdout.write_all(&filtered);
             let _ = stdout.flush();
@@ -351,7 +367,17 @@ pub fn run(command: &[String], opts: RunOptions) -> io::Result<u32> {
     });
 
     let status = child.wait().map_err(io::Error::other)?;
-    let _ = output_thread.join();
+    if stdout_lost.load(Ordering::Relaxed) {
+        let deadline = std::time::Instant::now() + LOST_OUTPUT_DRAIN;
+        while !output_thread.is_finished() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if output_thread.is_finished() {
+            let _ = output_thread.join();
+        }
+    } else {
+        let _ = output_thread.join();
+    }
     let _ = title_tx.send(TitleSignal::Stop);
     if let Some(handle) = title_thread {
         let _ = handle.join();
@@ -425,9 +451,14 @@ fn reclaim_project_socket(force: bool) -> io::Result<Option<crate::ipc::BoundSoc
     }
     let Some(pid) = existing.pid else {
         return Err(io::Error::other(
-            "cannot terminate the existing session: its pid was not recorded",
+            "cannot terminate the existing session: its pid could not be determined",
         ));
     };
+    if pid == std::process::id() {
+        return Err(io::Error::other(
+            "cannot terminate the existing session: it resolves to this process",
+        ));
+    }
     crate::ipc::terminate_session(pid, &existing.socket)?;
     crate::ipc::IpcServer::bind_project().map(Some)
 }
